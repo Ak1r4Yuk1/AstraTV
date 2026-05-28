@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.stalker.player.data.api.StalkerApiClient
 import com.stalker.player.data.api.M3uClient
+import com.stalker.player.data.api.RemoteImportServer
 import com.stalker.player.data.api.XtreamClient
 import com.stalker.player.data.repository.StalkerRepository
 import com.stalker.player.data.model.*
@@ -14,6 +15,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlin.random.Random
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val client = StalkerApiClient()
@@ -21,6 +23,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val m3uClient = M3uClient(application)
     private val repository = StalkerRepository(client, xtreamClient, m3uClient)
     private val settingsManager = SettingsManager(application)
+    private val remoteAccessCode = Random.nextInt(100_000, 1_000_000).toString()
+    private val remoteImportServer = RemoteImportServer(
+        context = application,
+        accessCode = remoteAccessCode,
+        profilesProvider = { profiles.value },
+        onProfileImported = { profile -> viewModelScope.launch { saveImportedProfile(profile) } },
+        onProfileDeleted = { name -> viewModelScope.launch { deleteProfileByName(name) } }
+    )
 
     val connected = MutableStateFlow(false)
     val isLoading get() = repository.isLoading
@@ -48,12 +58,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val currentMac = MutableStateFlow("")
     val currentUsername = MutableStateFlow("")
     val currentPassword = MutableStateFlow("")
+    val remoteImportUrl = MutableStateFlow("")
+    val remoteImportCode = MutableStateFlow(remoteAccessCode)
+    val remoteImportMessage = MutableStateFlow("")
 
     private var currentCategory: Category? = null
     private var activeTab = "Live"
 
     init {
         loadProfiles()
+        remoteImportServer.start()
+        remoteImportUrl.value = remoteImportServer.localUrl()
         viewModelScope.launch {
             settingsManager.language.collect { lang ->
                 appLanguage.value = lang
@@ -61,6 +76,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 client.lang = lang
             }
         }
+    }
+
+    override fun onCleared() {
+        remoteImportServer.stop()
+        super.onCleared()
     }
 
     fun setActiveTab(tab: String) {
@@ -74,7 +94,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun goBack() {
         if (navStack.isNotEmpty()) {
-            val prev = navStack.removeLast()
+            val prev = navStack.removeAt(navStack.lastIndex)
             currentView.value = prev.view
             navStackFlow.value = navStack.toList()
             currentCategory = prev.category
@@ -186,7 +206,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (selectedSeries.value != null) {
             selectedSeries.value = null
             while (navStack.isNotEmpty() && currentView.value != "channels") {
-                val prev = navStack.removeLast()
+                val prev = navStack.removeAt(navStack.lastIndex)
                 currentView.value = prev.view
                 currentCategory = prev.category
             }
@@ -195,7 +215,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun handleSeriesBack() {
-        if (currentView.value == "episodes") goBack() else clearDetail()
+        if (currentView.value == "episodes") goBack() else closeSeriesDetail()
+    }
+
+    fun closeSeriesDetail() {
+        selectedSeries.value = null
+        while (navStack.isNotEmpty() && (currentView.value == "seasons" || currentView.value == "episodes")) {
+            val prev = navStack.removeAt(navStack.lastIndex)
+            currentView.value = prev.view
+            currentCategory = prev.category
+        }
+        navStackFlow.value = navStack.toList()
     }
 
     fun setPlayerActive(active: Boolean) {
@@ -306,6 +336,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _loadedProfile.value = p
         }
     }
+    fun connectProfile(index: Int) {
+        profiles.value.getOrNull(index)?.let { p ->
+            portalType.value = p.type
+            _loadedProfile.value = p
+            connect(p.url, if (p.type == "xtream") p.username else p.mac, p.password)
+        }
+    }
     private val _loadedProfile = MutableStateFlow<Profile?>(null)
     val loadedProfile: StateFlow<Profile?> = _loadedProfile
     fun consumeLoadedProfile() { _loadedProfile.value = null }
@@ -320,6 +357,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     private fun persistProfiles() {
         viewModelScope.launch { settingsManager.saveProfilesJson(com.google.gson.Gson().toJson(profiles.value)) }
+    }
+
+    private fun saveImportedProfile(profile: Profile) {
+        val list = profiles.value.toMutableList()
+        val idx = list.indexOfFirst { it.name == profile.name }
+        if (idx >= 0) list[idx] = profile else list.add(profile)
+        profiles.value = list
+        persistProfiles()
+        _loadedProfile.value = profile
+        remoteImportMessage.value = "Profilo '${profile.name}' importato da browser. Premi Connetti per caricarlo."
+    }
+
+    fun clearRemoteImportMessage() { remoteImportMessage.value = "" }
+
+    private fun deleteProfileByName(name: String) {
+        val list = profiles.value.toMutableList()
+        val removed = list.removeAll { it.name == name }
+        if (removed) {
+            profiles.value = list
+            persistProfiles()
+            remoteImportMessage.value = "Profilo '$name' eliminato da browser."
+        }
     }
     
     private fun normalizeUrl(input: String): String {

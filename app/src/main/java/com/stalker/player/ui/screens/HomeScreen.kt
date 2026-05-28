@@ -731,6 +731,7 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
 // ─── Channel list view (Live tab) ───
 @Composable
 fun ChannelListView(viewModel: MainViewModel, tab: String, query: String, onPlay: () -> Unit) {
+    val configuration = LocalConfiguration.current
     val cv by viewModel.currentView.collectAsState()
     val ns by viewModel.navStackFlow.collectAsState()
     val chs by viewModel.channels.collectAsState()
@@ -756,26 +757,65 @@ fun ChannelListView(viewModel: MainViewModel, tab: String, query: String, onPlay
             else -> (cats[tab] ?: emptyList()).map { cat -> Channel(id = cat.categoryId, name = cat.name, itemType = "category", categoryType = cat.categoryType, screenshotUri = cat.screenshotUri) }
         }
         val filtered = if (query.isBlank()) items else items.filter { it.name.contains(query, true) }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
-            items(filtered) { item ->
-                Card(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp).clickable {
-                    scope.launch {
-                        if (item.itemType == "category") viewModel.onCategoryClick(Category(item.name, item.categoryType, item.id))
-                        else viewModel.startPlayback(item, onPlay)
-                    }
-                }, colors = CardDefaults.cardColors(containerColor = CardBg), shape = RoundedCornerShape(18.dp), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
-                    Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ChanIcon(item.screenshotUri, item.itemType)
-                        Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) {
-                            Text(item.name, color = White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
+        val useTvGrid = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE && configuration.screenWidthDp >= 960
+        if (useTvGrid) {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = if (cv == "channels") 300.dp else 260.dp),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 22.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(filtered) { item ->
+                    ChannelRowCard(item = item, onClick = {
+                        scope.launch {
+                            if (item.itemType == "category") viewModel.onCategoryClick(Category(item.name, item.categoryType, item.id))
+                            else viewModel.startPlayback(item, onPlay)
                         }
-                        if (item.itemType == "category") Surface(color = Cyan.copy(alpha = 0.1f), shape = RoundedCornerShape(4.dp)) { Text(Strings.categoryTypeLabel(item.categoryType), color = Cyan, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)) }
-                    }
+                    })
+                }
+            }
+        } else {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
+                items(filtered) { item ->
+                    ChannelRowCard(
+                        item = item,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                        onClick = {
+                            scope.launch {
+                                if (item.itemType == "category") viewModel.onCategoryClick(Category(item.name, item.categoryType, item.id))
+                                else viewModel.startPlayback(item, onPlay)
+                            }
+                        }
+                    )
                 }
             }
         }
     }
 
+}
+
+@Composable
+private fun ChannelRowCard(item: Channel, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Card(
+        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = CardBg),
+        shape = RoundedCornerShape(18.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            ChanIcon(item.screenshotUri, item.itemType)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(item.name, color = White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
+            }
+            if (item.itemType == "category") {
+                Surface(color = Cyan.copy(alpha = 0.1f), shape = RoundedCornerShape(4.dp)) {
+                    Text(Strings.categoryTypeLabel(item.categoryType), color = Cyan, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp))
+                }
+            }
+        }
+    }
 }
 
 // ─── Grid view (Movies/Series tabs) ───
