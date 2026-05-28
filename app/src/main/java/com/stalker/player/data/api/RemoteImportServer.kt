@@ -1,6 +1,7 @@
 package com.stalker.player.data.api
 
 import android.content.Context
+import com.stalker.player.R
 import com.stalker.player.data.model.Profile
 import com.stalker.player.data.model.Strings
 import java.io.BufferedInputStream
@@ -55,7 +56,7 @@ class RemoteImportServer(
     }
 
     fun localUrl(): String {
-        return "http://${localIpAddress()}:$PORT/?code=$accessCode"
+        return "http://${localIpAddress()}:$PORT/?code=$accessCode&lang=${Strings.lang.value}"
     }
 
     private fun handle(socket: Socket) {
@@ -66,6 +67,7 @@ class RemoteImportServer(
                 val request = readRequest(input)
                 val lang = request.lang()
                 val response = when {
+                    request.method == "GET" && request.path == "/brand.png" -> imageResponse(loadBrandImage())
                     !request.isAuthorized() -> htmlResponse(authPage(request.query["code"].orEmpty(), lang), 401)
                     request.method == "GET" -> htmlResponse(homePage(request.query["notice"], lang), lang = lang)
                     request.method == "POST" && request.path == "/import" -> handleImport(request)
@@ -203,6 +205,11 @@ class RemoteImportServer(
         body = body.toByteArray(StandardCharsets.UTF_8),
         headers = lang?.let { mapOf("Content-Language" to it) }.orEmpty()
     )
+    private fun imageResponse(bytes: ByteArray) = HttpResponse(
+        status = 200,
+        contentType = "image/png",
+        body = bytes
+    )
     private fun textResponse(status: Int, body: String) = HttpResponse(status, "text/plain; charset=utf-8", body.toByteArray(StandardCharsets.UTF_8))
     private fun redirectResponse(location: String) = HttpResponse(
         status = 303,
@@ -250,11 +257,12 @@ class RemoteImportServer(
             <title>$title Remote Import</title><style>
             *{box-sizing:border-box}html,body{max-width:100%;overflow-x:hidden}body{margin:0;background:#0b111d;color:#e7edf4;font-family:system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh;padding:clamp(12px,3vw,22px)}body:before{content:"";position:fixed;inset:0;background:radial-gradient(circle at 70% 12%,rgba(127,166,201,.24),transparent 34%),linear-gradient(135deg,#080d18,#182539 62%,#27384d);z-index:-1}
             main{width:min(100%,980px);margin:auto;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(260px,.85fr);gap:18px}.card{min-width:0;background:rgba(17,22,29,.88);border:1px solid rgba(127,166,201,.22);border-radius:26px;padding:clamp(16px,3vw,24px);box-shadow:0 20px 70px rgba(0,0,0,.38)}
+            .hero{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.brand{display:flex;align-items:center;gap:14px}.brand img{width:48px;height:48px;object-fit:contain;border-radius:14px;background:rgba(255,255,255,.06);padding:6px}.langbox{min-width:180px}
             h1{margin:0 0 8px;font-size:clamp(28px,5vw,34px)}h2{margin:0 0 14px;font-size:20px}p{color:#aeb8c8;line-height:1.5}.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.hidden{display:none}@media(max-width:860px){main,.grid{grid-template-columns:1fr}.card{border-radius:22px}}
             label{display:block;font-size:13px;color:#9fb0c5;margin:14px 0 6px}input,select{width:100%;min-width:0;background:#0f1622;color:#e7edf4;border:1px solid #314158;border-radius:14px;padding:13px;font-size:16px}input[type=file]{padding:10px}.notice{background:rgba(127,166,201,.14);border:1px solid rgba(127,166,201,.32);border-radius:16px;padding:14px;margin:18px 0;color:#dcefff}
             button{margin-top:20px;width:100%;border:0;border-radius:16px;background:#7fa6c9;color:#08101b;padding:15px;font-weight:800;font-size:16px}.hint{font-size:13px;color:#8c99aa}.profile{min-width:0;max-width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;background:#101824;border:1px solid rgba(127,166,201,.14);border-radius:16px;padding:13px;margin:10px 0}.profile>div{min-width:0;max-width:100%;overflow:hidden}.profile strong,.profile small{display:block;min-width:0;max-width:100%}.profile span{display:inline-block;margin:5px 0;color:#7fa6c9;font-size:12px}.profile small{color:#8c99aa;overflow-wrap:anywhere;word-break:break-word;white-space:normal;line-height:1.35}.profile form{margin:0}.danger{margin:0;background:#d06c62;color:#180807;padding:10px 12px;font-size:13px}.empty{font-size:14px}@media(max-width:520px){.profile{grid-template-columns:1fr}.danger{width:100%}}
-            </style></head><body><main><h1>$title</h1><p>$description</p>$notice
-            <section class="card"><h2>${escape(Strings.getFor("newProfile", lang))}</h2><form method="post" action="/import" enctype="multipart/form-data"><input type="hidden" name="code" value="$accessCode"><input type="hidden" name="lang" value="$lang"><div class="grid"><div><label>${escape(Strings.getFor("language", lang))}</label><select name="lang_picker" id="langPicker"><option value="it" ${optionSelected("it")}>Italiano</option><option value="en" ${optionSelected("en")}>English</option><option value="fr" ${optionSelected("fr")}>Français</option><option value="de" ${optionSelected("de")}>Deutsch</option><option value="es" ${optionSelected("es")}>Español</option><option value="ru" ${optionSelected("ru")}>Русский</option></select></div><div><label>${escape(Strings.getFor("profileName", lang))}</label><input name="name" placeholder="Casa, Provider, Test..."></div></div><div class="grid"><div><label>${escape(Strings.getFor("type", lang))}</label><select name="type" id="type"><option value="m3u">M3U / M3U8</option><option value="xtream">Xtream Codes</option><option value="mac">MAC / STB</option></select></div><div></div></div>
+            </style></head><body><main><div class="hero"><div class="brand"><img src="/brand.png?code=$accessCode&lang=$lang" alt="AstraTV"><div><h1>$title</h1><p>$description</p></div></div><div class="langbox"><label>${escape(Strings.getFor("language", lang))}</label><select id="langPicker"><option value="it" ${optionSelected("it")}>Italiano</option><option value="en" ${optionSelected("en")}>English</option><option value="fr" ${optionSelected("fr")}>Français</option><option value="de" ${optionSelected("de")}>Deutsch</option><option value="es" ${optionSelected("es")}>Español</option><option value="ru" ${optionSelected("ru")}>Русский</option></select></div></div>$notice
+            <section class="card"><h2>${escape(Strings.getFor("newProfile", lang))}</h2><form method="post" action="/import" enctype="multipart/form-data"><input type="hidden" name="code" value="$accessCode"><input type="hidden" name="lang" value="$lang"><div class="grid"><div><label>${escape(Strings.getFor("type", lang))}</label><select name="type" id="type"><option value="m3u">M3U / M3U8</option><option value="xtream">Xtream Codes</option><option value="mac">MAC / STB</option></select></div><div><label>${escape(Strings.getFor("profileName", lang))}</label><input name="name" placeholder="Casa, Provider, Test..."></div></div>
             <div data-kind="m3u"><label>${escape(Strings.getFor("m3uSource", lang))}</label><input name="url" placeholder="https://server/get.php?..."><label>${escape(Strings.getFor("uploadFile", lang))}</label><input name="file" type="file" accept=".m3u,.m3u8,text/*"><div class="hint">${escape(Strings.getFor("uploadLimit", lang))}</div></div>
             <div data-kind="xtream" class="hidden"><label>${escape(Strings.getFor("xtreamServer", lang))}</label><input name="url" placeholder="http://server:porta"><div class="grid"><div><label>${escape(Strings.getFor("username", lang))}</label><input name="username"></div><div><label>${escape(Strings.getFor("password", lang))}</label><input name="password" type="password"></div></div></div>
             <div data-kind="mac" class="hidden"><label>${escape(Strings.getFor("portalUrl", lang))}</label><input name="url" placeholder="http://portal:8080/c/"><label>${escape(Strings.getFor("macAddress", lang))}</label><input name="mac" placeholder="00:1A:79:XX:XX:XX"></div>
@@ -289,6 +297,8 @@ class RemoteImportServer(
     private fun HttpRequest.lang(): String {
         val fromQuery = query["lang"]?.lowercase(Locale.ROOT)
         if (fromQuery in setOf("it", "en", "fr", "de", "es", "ru")) return fromQuery!!
+        val fromApp = Strings.lang.value.lowercase(Locale.ROOT)
+        if (fromApp in setOf("it", "en", "fr", "de", "es", "ru")) return fromApp
         val fromHeader = headers["accept-language"]
             ?.split(',', ';')
             ?.map { it.trim().lowercase(Locale.ROOT).take(2) }
@@ -300,6 +310,12 @@ class RemoteImportServer(
         "xtream" -> "Xtream remoto"
         "mac" -> "MAC remoto"
         else -> "M3U remoto"
+    }
+
+    private fun loadBrandImage(): ByteArray {
+        context.resources.openRawResource(R.drawable.banner).use { input ->
+            return input.readBytes()
+        }
     }
 
     private fun localIpAddress(): String {

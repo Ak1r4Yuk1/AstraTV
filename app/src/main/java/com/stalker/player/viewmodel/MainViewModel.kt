@@ -81,6 +81,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 appLanguage.value = lang
                 Strings.lang.value = lang
                 client.lang = lang
+                remoteImportUrl.value = remoteImportServer.localUrl()
             }
         }
     }

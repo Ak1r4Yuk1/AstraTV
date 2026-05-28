@@ -436,7 +436,7 @@ private fun TvTextField(value: String, onValueChange: (String) -> Unit, label: S
 private fun QrCodeImage(text: String, modifier: Modifier = Modifier) {
     val bitmap = remember(text) { createQrBitmap(text.ifBlank { "AstraTV" }, 512) }
     Surface(modifier, color = Color.White, shape = RoundedCornerShape(24.dp)) {
-        Image(bitmap.asImageBitmap(), null, modifier = Modifier.fillMaxSize().padding(18.dp))
+        Image(bitmap.asImageBitmap(), null, modifier = Modifier.fillMaxSize().padding(10.dp))
     }
 }
 
