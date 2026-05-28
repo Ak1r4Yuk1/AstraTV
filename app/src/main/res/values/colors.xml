@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="dark_bg">#1b2332</color>
+    <color name="dark_widget">#253046</color>
+    <color name="accent_cyan">#00dfff</color>
+    <color name="text_primary">#e3f6ff</color>
+    <color name="text_secondary">#8899aa</color>
+    <color name="progress_cyan">#00dfff</color>
+</resources>
