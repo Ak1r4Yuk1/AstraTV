@@ -684,7 +684,8 @@ class StalkerRepository(
     private fun filterVisibleItems(items: List<Channel>): List<Channel> = items.filter(::isVisibleItem)
 
     private fun isVisibleItem(item: Channel): Boolean {
-        return !item.name.contains("=")
+        val name = item.name
+        return !name.contains("=") && name.count { it == '-' } < 2
     }
 
     private data class ParsedEpisodeToken(
