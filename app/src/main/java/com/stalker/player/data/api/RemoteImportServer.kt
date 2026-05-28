@@ -67,7 +67,7 @@ class RemoteImportServer(
                 val lang = request.lang()
                 val response = when {
                     !request.isAuthorized() -> htmlResponse(authPage(request.query["code"].orEmpty(), lang), 401)
-                    request.method == "GET" -> htmlResponse(homePage(null, lang))
+                    request.method == "GET" -> htmlResponse(homePage(request.query["notice"], lang), lang = lang)
                     request.method == "POST" && request.path == "/import" -> handleImport(request)
                     request.method == "POST" && request.path == "/delete" -> handleDelete(request)
                     else -> textResponse(404, "Not found")
@@ -107,7 +107,9 @@ class RemoteImportServer(
         if (type == "mac") require(mac.isNotBlank()) { Strings.getFor("macRequired", lang) }
 
         onProfileImported(Profile(name = name, url = finalUrl, mac = mac, username = username, password = password, type = type))
-        return htmlResponse(homePage(Strings.fmtFor("webImported", lang, escape(name)), lang))
+        return redirectResponse(
+            location = "/?code=$accessCode&lang=$lang&notice=${urlEncode(Strings.fmtFor("webImported", lang, name))}"
+        )
     }
 
     private fun handleDelete(request: HttpRequest): HttpResponse {
@@ -116,7 +118,9 @@ class RemoteImportServer(
         val name = fields["name"].orEmpty()
         require(name.isNotBlank()) { Strings.getFor("invalidProfile", lang) }
         onProfileDeleted(name)
-        return htmlResponse(homePage(Strings.fmtFor("webDeleted", lang, escape(name)), lang))
+        return redirectResponse(
+            location = "/?code=$accessCode&lang=$lang&notice=${urlEncode(Strings.fmtFor("webDeleted", lang, name))}"
+        )
     }
 
     private fun saveUploadedPlaylist(name: String, bytes: ByteArray): String {
@@ -193,13 +197,33 @@ class RemoteImportServer(
         return parts
     }
 
-    private fun htmlResponse(body: String, status: Int = 200) = HttpResponse(status, "text/html; charset=utf-8", body.toByteArray(StandardCharsets.UTF_8))
+    private fun htmlResponse(body: String, status: Int = 200, lang: String? = null) = HttpResponse(
+        status = status,
+        contentType = "text/html; charset=utf-8",
+        body = body.toByteArray(StandardCharsets.UTF_8),
+        headers = lang?.let { mapOf("Content-Language" to it) }.orEmpty()
+    )
     private fun textResponse(status: Int, body: String) = HttpResponse(status, "text/plain; charset=utf-8", body.toByteArray(StandardCharsets.UTF_8))
+    private fun redirectResponse(location: String) = HttpResponse(
+        status = 303,
+        contentType = "text/plain; charset=utf-8",
+        body = ByteArray(0),
+        headers = mapOf("Location" to location)
+    )
 
     private fun OutputStream.writeResponse(response: HttpResponse) {
-        val reason = if (response.status == 200) "OK" else "Error"
+        val reason = when (response.status) {
+            200 -> "OK"
+            303 -> "See Other"
+            401 -> "Unauthorized"
+            404 -> "Not Found"
+            else -> "Error"
+        }
         write("HTTP/1.1 ${response.status} $reason\r\n".toByteArray())
         write("Content-Type: ${response.contentType}\r\n".toByteArray())
+        response.headers.forEach { (key, value) ->
+            write("$key: $value\r\n".toByteArray())
+        }
         write("Content-Length: ${response.body.size}\r\n".toByteArray())
         write("Connection: close\r\n\r\n".toByteArray())
         write(response.body)
@@ -289,6 +313,7 @@ class RemoteImportServer(
     }
 
     private fun decode(value: String) = URLDecoder.decode(value, StandardCharsets.UTF_8.name())
+    private fun urlEncode(value: String) = java.net.URLEncoder.encode(value, StandardCharsets.UTF_8.name())
     private fun escape(value: String) = value
         .replace("&", "&amp;")
         .replace("<", "&lt;")
@@ -297,6 +322,6 @@ class RemoteImportServer(
         .replace("'", "&#39;")
 
     private data class HttpRequest(val method: String, val path: String, val query: Map<String, String>, val headers: Map<String, String>, val body: ByteArray)
-    private data class HttpResponse(val status: Int, val contentType: String, val body: ByteArray)
+    private data class HttpResponse(val status: Int, val contentType: String, val body: ByteArray, val headers: Map<String, String> = emptyMap())
     private data class FormPart(val text: String = "", val bytes: ByteArray = ByteArray(0))
 }
