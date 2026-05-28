@@ -630,7 +630,7 @@ class StalkerRepository(
     }
 
     private suspend fun searchStb(tab: String, query: String): List<Channel> {
-        val resolvedToken = token ?: throw IOException("Sessione STB non disponibile")
+        val resolvedToken = token ?: throw IOException(Strings["stbSessionUnavailable"])
         val apiType = when (tab) {
             "Movies" -> "vod"
             "Series" -> "series"
@@ -1094,5 +1094,5 @@ class StalkerRepository(
     }
 
     fun clearError() { _error.value = null }
-    fun setError(msg: String) { _error.value = msg }
+    fun setError(msg: String) { _error.value = Strings.localizeError(msg) }
 }

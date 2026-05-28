@@ -2,6 +2,7 @@ package com.stalker.player.data.api
 
 import android.content.Context
 import com.stalker.player.data.model.Profile
+import com.stalker.player.data.model.Strings
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -63,21 +64,24 @@ class RemoteImportServer(
                 s.soTimeout = 15_000
                 val input = BufferedInputStream(s.getInputStream())
                 val request = readRequest(input)
+                val lang = request.lang()
                 val response = when {
-                    !request.isAuthorized() -> htmlResponse(authPage(request.query["code"].orEmpty()), 401)
-                    request.method == "GET" -> htmlResponse(homePage(null))
+                    !request.isAuthorized() -> htmlResponse(authPage(request.query["code"].orEmpty(), lang), 401)
+                    request.method == "GET" -> htmlResponse(homePage(null, lang))
                     request.method == "POST" && request.path == "/import" -> handleImport(request)
                     request.method == "POST" && request.path == "/delete" -> handleDelete(request)
                     else -> textResponse(404, "Not found")
                 }
                 s.getOutputStream().writeResponse(response)
             } catch (e: Exception) {
-                s.getOutputStream().writeResponse(htmlResponse(homePage("Errore: ${escape(e.message ?: e.toString())}"), 500))
+                val fallbackLang = "it"
+                s.getOutputStream().writeResponse(htmlResponse(homePage("${Strings.getFor("error", fallbackLang)}: ${escape(e.message ?: e.toString())}", fallbackLang), 500))
             }
         }
     }
 
     private fun handleImport(request: HttpRequest): HttpResponse {
+        val lang = request.lang()
         val contentType = request.headers["content-type"].orEmpty()
         val fields = if (contentType.startsWith("multipart/form-data", ignoreCase = true)) {
             parseMultipart(request.body, contentType)
@@ -98,20 +102,21 @@ class RemoteImportServer(
             else -> url
         }
 
-        require(finalUrl.isNotBlank()) { "Inserisci un URL oppure carica un file M3U." }
-        if (type == "xtream") require(username.isNotBlank() && password.isNotBlank()) { "Username e password Xtream sono obbligatori." }
-        if (type == "mac") require(mac.isNotBlank()) { "MAC address obbligatorio per profilo MAC/STB." }
+        require(finalUrl.isNotBlank()) { Strings.getFor("enterUrlOrUpload", lang) }
+        if (type == "xtream") require(username.isNotBlank() && password.isNotBlank()) { Strings.getFor("xtreamCredsRequired", lang) }
+        if (type == "mac") require(mac.isNotBlank()) { Strings.getFor("macRequired", lang) }
 
         onProfileImported(Profile(name = name, url = finalUrl, mac = mac, username = username, password = password, type = type))
-        return htmlResponse(homePage("Profilo '${escape(name)}' importato. Ora puoi caricarlo dalla TV in Profili."))
+        return htmlResponse(homePage(Strings.fmtFor("webImported", lang, escape(name)), lang))
     }
 
     private fun handleDelete(request: HttpRequest): HttpResponse {
+        val lang = request.lang()
         val fields = parseUrlEncoded(String(request.body, StandardCharsets.UTF_8))
         val name = fields["name"].orEmpty()
-        require(name.isNotBlank()) { "Profilo non valido" }
+        require(name.isNotBlank()) { Strings.getFor("invalidProfile", lang) }
         onProfileDeleted(name)
-        return htmlResponse(homePage("Profilo '${escape(name)}' eliminato."))
+        return htmlResponse(homePage(Strings.fmtFor("webDeleted", lang, escape(name)), lang))
     }
 
     private fun saveUploadedPlaylist(name: String, bytes: ByteArray): String {
@@ -138,14 +143,14 @@ class RemoteImportServer(
 
         val headerText = headerBytes.toString(StandardCharsets.ISO_8859_1.name())
         val lines = headerText.split("\r\n").filter { it.isNotBlank() }
-        require(lines.isNotEmpty()) { "Richiesta vuota" }
+        require(lines.isNotEmpty()) { Strings["requestEmpty"] }
         val requestLine = lines.first().split(" ")
         val headers = lines.drop(1).mapNotNull { line ->
             val idx = line.indexOf(':')
             if (idx <= 0) null else line.substring(0, idx).lowercase(Locale.ROOT) to line.substring(idx + 1).trim()
         }.toMap()
         val length = headers["content-length"]?.toIntOrNull() ?: 0
-        require(length <= MAX_BODY_BYTES) { "File troppo grande. Limite: ${MAX_BODY_BYTES / 1024 / 1024} MB" }
+        require(length <= MAX_BODY_BYTES) { Strings.fmt("fileTooLarge", (MAX_BODY_BYTES / 1024 / 1024).toString()) }
         val body = ByteArray(length)
         var read = 0
         while (read < length) {
@@ -169,7 +174,7 @@ class RemoteImportServer(
 
     private fun parseMultipart(body: ByteArray, contentType: String): Map<String, FormPart> {
         val boundary = contentType.substringAfter("boundary=", "").trim().trim('"')
-        require(boundary.isNotBlank()) { "Multipart non valido" }
+        require(boundary.isNotBlank()) { Strings["multipartInvalid"] }
         val raw = String(body, StandardCharsets.ISO_8859_1)
         val parts = linkedMapOf<String, FormPart>()
         raw.split("--$boundary").forEach { part ->
@@ -201,32 +206,35 @@ class RemoteImportServer(
         flush()
     }
 
-    private fun homePage(message: String?): String {
+    private fun homePage(message: String?, lang: String): String {
         val notice = message?.let { "<div class='notice'>$it</div>" }.orEmpty()
         val profiles = profilesProvider()
         val profileRows = if (profiles.isEmpty()) {
-            "<p class='empty'>Nessun profilo salvato.</p>"
+            "<p class='empty'>${escape(Strings.getFor("noProfiles", lang))}</p>"
         } else {
             profiles.joinToString("") { profile ->
                 """
-                <div class="profile"><div><strong>${escape(profile.name)}</strong><span>${escape(typeLabel(profile.type))}</span><small>${escape(profile.url)}</small></div><form method="post" action="/delete" onsubmit="return confirm('Eliminare ${escape(profile.name)}?')"><input type="hidden" name="code" value="$accessCode"><input type="hidden" name="name" value="${escape(profile.name)}"><button class="danger" type="submit">Elimina</button></form></div>
+                <div class="profile"><div><strong>${escape(profile.name)}</strong><span>${escape(typeLabel(profile.type))}</span><small>${escape(profile.url)}</small></div><form method="post" action="/delete" onsubmit="return confirm('${escape(Strings.fmtFor("confirmDeleteProfileNamed", lang, profile.name))}')"><input type="hidden" name="code" value="$accessCode"><input type="hidden" name="lang" value="$lang"><input type="hidden" name="name" value="${escape(profile.name)}"><button class="danger" type="submit">${escape(Strings.getFor("delete", lang))}</button></form></div>
                 """.trimIndent()
             }
         }
+        val title = escape(Strings["tvApp"])
+        val description = escape(Strings.getFor("webImportTitle", lang))
+        val optionSelected = { code: String -> if (lang == code) "selected" else "" }
         return """
-            <!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>AstraTV Remote Import</title><style>
+            <!doctype html><html lang="$lang"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>$title Remote Import</title><style>
             *{box-sizing:border-box}html,body{max-width:100%;overflow-x:hidden}body{margin:0;background:#0b111d;color:#e7edf4;font-family:system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh;padding:clamp(12px,3vw,22px)}body:before{content:"";position:fixed;inset:0;background:radial-gradient(circle at 70% 12%,rgba(127,166,201,.24),transparent 34%),linear-gradient(135deg,#080d18,#182539 62%,#27384d);z-index:-1}
             main{width:min(100%,980px);margin:auto;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(260px,.85fr);gap:18px}.card{min-width:0;background:rgba(17,22,29,.88);border:1px solid rgba(127,166,201,.22);border-radius:26px;padding:clamp(16px,3vw,24px);box-shadow:0 20px 70px rgba(0,0,0,.38)}
             h1{margin:0 0 8px;font-size:clamp(28px,5vw,34px)}h2{margin:0 0 14px;font-size:20px}p{color:#aeb8c8;line-height:1.5}.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.hidden{display:none}@media(max-width:860px){main,.grid{grid-template-columns:1fr}.card{border-radius:22px}}
             label{display:block;font-size:13px;color:#9fb0c5;margin:14px 0 6px}input,select{width:100%;min-width:0;background:#0f1622;color:#e7edf4;border:1px solid #314158;border-radius:14px;padding:13px;font-size:16px}input[type=file]{padding:10px}.notice{background:rgba(127,166,201,.14);border:1px solid rgba(127,166,201,.32);border-radius:16px;padding:14px;margin:18px 0;color:#dcefff}
             button{margin-top:20px;width:100%;border:0;border-radius:16px;background:#7fa6c9;color:#08101b;padding:15px;font-weight:800;font-size:16px}.hint{font-size:13px;color:#8c99aa}.profile{min-width:0;max-width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;background:#101824;border:1px solid rgba(127,166,201,.14);border-radius:16px;padding:13px;margin:10px 0}.profile>div{min-width:0;max-width:100%;overflow:hidden}.profile strong,.profile small{display:block;min-width:0;max-width:100%}.profile span{display:inline-block;margin:5px 0;color:#7fa6c9;font-size:12px}.profile small{color:#8c99aa;overflow-wrap:anywhere;word-break:break-word;white-space:normal;line-height:1.35}.profile form{margin:0}.danger{margin:0;background:#d06c62;color:#180807;padding:10px 12px;font-size:13px}.empty{font-size:14px}@media(max-width:520px){.profile{grid-template-columns:1fr}.danger{width:100%}}
-            </style></head><body><main><h1>AstraTV</h1><p>Importa una lista o un profilo dal telefono/PC. Dopo il salvataggio, apri <b>Profili</b> sulla TV e carica il nuovo profilo.</p>$notice
-            <section class="card"><h2>Nuovo profilo</h2><form method="post" action="/import" enctype="multipart/form-data"><input type="hidden" name="code" value="$accessCode"><div class="grid"><div><label>Tipo</label><select name="type" id="type"><option value="m3u">M3U / M3U8</option><option value="xtream">Xtream Codes</option><option value="mac">MAC / STB</option></select></div><div><label>Nome profilo</label><input name="name" placeholder="Casa, Provider, Test..."></div></div>
-            <div data-kind="m3u"><label>URL lista M3U</label><input name="url" placeholder="https://server/get.php?..."><label>Oppure carica file M3U</label><input name="file" type="file" accept=".m3u,.m3u8,text/*"><div class="hint">Limite upload: 60 MB.</div></div>
-            <div data-kind="xtream" class="hidden"><label>Server Xtream</label><input name="url" placeholder="http://server:porta"><div class="grid"><div><label>Username</label><input name="username"></div><div><label>Password</label><input name="password" type="password"></div></div></div>
-            <div data-kind="mac" class="hidden"><label>URL portale</label><input name="url" placeholder="http://portal:8080/c/"><label>MAC address</label><input name="mac" placeholder="00:1A:79:XX:XX:XX"></div>
-            <button type="submit">Salva su AstraTV</button></form></section><section class="card"><h2>Profili salvati</h2>$profileRows</section></main><script>const t=document.getElementById('type');function sync(){document.querySelectorAll('[data-kind]').forEach(e=>{const active=e.dataset.kind===t.value;e.classList.toggle('hidden',!active);e.querySelectorAll('input,select,textarea').forEach(i=>i.disabled=!active);});}t.addEventListener('change',sync);sync();</script></body></html>
+            </style></head><body><main><h1>$title</h1><p>$description</p>$notice
+            <section class="card"><h2>${escape(Strings.getFor("newProfile", lang))}</h2><form method="post" action="/import" enctype="multipart/form-data"><input type="hidden" name="code" value="$accessCode"><input type="hidden" name="lang" value="$lang"><div class="grid"><div><label>${escape(Strings.getFor("language", lang))}</label><select name="lang_picker" id="langPicker"><option value="it" ${optionSelected("it")}>Italiano</option><option value="en" ${optionSelected("en")}>English</option><option value="fr" ${optionSelected("fr")}>Français</option><option value="de" ${optionSelected("de")}>Deutsch</option><option value="es" ${optionSelected("es")}>Español</option><option value="ru" ${optionSelected("ru")}>Русский</option></select></div><div><label>${escape(Strings.getFor("profileName", lang))}</label><input name="name" placeholder="Casa, Provider, Test..."></div></div><div class="grid"><div><label>${escape(Strings.getFor("type", lang))}</label><select name="type" id="type"><option value="m3u">M3U / M3U8</option><option value="xtream">Xtream Codes</option><option value="mac">MAC / STB</option></select></div><div></div></div>
+            <div data-kind="m3u"><label>${escape(Strings.getFor("m3uSource", lang))}</label><input name="url" placeholder="https://server/get.php?..."><label>${escape(Strings.getFor("uploadFile", lang))}</label><input name="file" type="file" accept=".m3u,.m3u8,text/*"><div class="hint">${escape(Strings.getFor("uploadLimit", lang))}</div></div>
+            <div data-kind="xtream" class="hidden"><label>${escape(Strings.getFor("xtreamServer", lang))}</label><input name="url" placeholder="http://server:porta"><div class="grid"><div><label>${escape(Strings.getFor("username", lang))}</label><input name="username"></div><div><label>${escape(Strings.getFor("password", lang))}</label><input name="password" type="password"></div></div></div>
+            <div data-kind="mac" class="hidden"><label>${escape(Strings.getFor("portalUrl", lang))}</label><input name="url" placeholder="http://portal:8080/c/"><label>${escape(Strings.getFor("macAddress", lang))}</label><input name="mac" placeholder="00:1A:79:XX:XX:XX"></div>
+            <button type="submit">${escape(Strings.getFor("saveOnTv", lang))}</button></form></section><section class="card"><h2>${escape(Strings.getFor("savedProfilesTitle", lang))}</h2>$profileRows</section></main><script>const t=document.getElementById('type');const lp=document.getElementById('langPicker');function sync(){document.querySelectorAll('[data-kind]').forEach(e=>{const active=e.dataset.kind===t.value;e.classList.toggle('hidden',!active);e.querySelectorAll('input,select,textarea').forEach(i=>i.disabled=!active);});}lp.addEventListener('change',()=>{const u=new URL(window.location.href);u.searchParams.set('code','$accessCode');u.searchParams.set('lang',lp.value);window.location.href=u.toString();});t.addEventListener('change',sync);sync();</script></body></html>
         """.trimIndent()
     }
 
@@ -236,8 +244,8 @@ class RemoteImportServer(
         else -> "M3U / M3U8"
     }
 
-    private fun authPage(typedCode: String): String = """
-        <!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AstraTV</title><style>body{margin:0;background:#0b111d;color:#e7edf4;font-family:system-ui;min-height:100vh;display:grid;place-items:center;padding:24px}main{width:min(420px,100%);background:#11161d;border:1px solid rgba(127,166,201,.25);border-radius:24px;padding:24px}input,button{width:100%;box-sizing:border-box;border-radius:14px;padding:14px;font-size:18px}input{background:#0f1622;color:#e7edf4;border:1px solid #314158}button{margin-top:14px;border:0;background:#7fa6c9;color:#08101b;font-weight:800}</style></head><body><main><h1>AstraTV</h1><p>Inserisci il codice mostrato sulla TV.</p><form method="get"><input name="code" value="${escape(typedCode)}" placeholder="Codice TV"><button>Entra</button></form></main></body></html>
+    private fun authPage(typedCode: String, lang: String): String = """
+        <!doctype html><html lang="$lang"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${Strings["tvApp"]}</title><style>body{margin:0;background:#0b111d;color:#e7edf4;font-family:system-ui;min-height:100vh;display:grid;place-items:center;padding:24px}main{width:min(420px,100%);background:#11161d;border:1px solid rgba(127,166,201,.25);border-radius:24px;padding:24px}input,button,select{width:100%;box-sizing:border-box;border-radius:14px;padding:14px;font-size:18px;margin-top:12px}input,select{background:#0f1622;color:#e7edf4;border:1px solid #314158}button{border:0;background:#7fa6c9;color:#08101b;font-weight:800}</style></head><body><main><h1>${Strings["tvApp"]}</h1><p>${escape(Strings.getFor("enterTvCode", lang))}</p><form method="get"><select name="lang"><option value="it" ${if (lang == "it") "selected" else ""}>Italiano</option><option value="en" ${if (lang == "en") "selected" else ""}>English</option><option value="fr" ${if (lang == "fr") "selected" else ""}>Français</option><option value="de" ${if (lang == "de") "selected" else ""}>Deutsch</option><option value="es" ${if (lang == "es") "selected" else ""}>Español</option><option value="ru" ${if (lang == "ru") "selected" else ""}>Русский</option></select><input name="code" value="${escape(typedCode)}" placeholder="${escape(Strings.getFor("tvCodePlaceholder", lang))}"><button>${escape(Strings.getFor("enter", lang))}</button></form></main></body></html>
     """.trimIndent()
 
     private fun HttpRequest.isAuthorized(): Boolean {
@@ -252,6 +260,16 @@ class RemoteImportServer(
             }
         }
         return false
+    }
+
+    private fun HttpRequest.lang(): String {
+        val fromQuery = query["lang"]?.lowercase(Locale.ROOT)
+        if (fromQuery in setOf("it", "en", "fr", "de", "es", "ru")) return fromQuery!!
+        val fromHeader = headers["accept-language"]
+            ?.split(',', ';')
+            ?.map { it.trim().lowercase(Locale.ROOT).take(2) }
+            ?.firstOrNull { it in setOf("it", "en", "fr", "de", "es", "ru") }
+        return fromHeader ?: "it"
     }
 
     private fun defaultProfileName(type: String) = when (type) {

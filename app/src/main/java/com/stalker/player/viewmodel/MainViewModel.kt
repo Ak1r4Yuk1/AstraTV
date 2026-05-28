@@ -193,7 +193,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (_: TimeoutCancellationException) {
                 connected.value = false
-                repository.setError("Timeout di connessione: login annullato dopo 10 secondi")
+                repository.setError(Strings["connectionTimeout"])
             } catch (e: CancellationException) { 
             } catch (e: Exception) { 
                 repository.setError(e.message ?: e.toString()) 
@@ -398,7 +398,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         profiles.value = list
         persistProfiles()
         _loadedProfile.value = profile
-        remoteImportMessage.value = "Profilo '${profile.name}' importato da browser. Premi Connetti per caricarlo."
+        remoteImportMessage.value = Strings.fmt("profileImported", profile.name)
     }
 
     fun clearRemoteImportMessage() { remoteImportMessage.value = "" }
@@ -409,7 +409,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (removed) {
             profiles.value = list
             persistProfiles()
-            remoteImportMessage.value = "Profilo '$name' eliminato da browser."
+            remoteImportMessage.value = Strings.fmt("profileDeleted", name)
         }
     }
     

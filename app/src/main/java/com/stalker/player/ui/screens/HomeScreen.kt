@@ -95,6 +95,7 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
     var showProfMgr by remember { mutableStateOf(false) }
     var showSave by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var pendingDeleteProfile by remember { mutableStateOf<Profile?>(null) }
     var pname by remember { mutableStateOf("") }
     var searchQ by remember { mutableStateOf("") }
     var connectPending by remember { mutableStateOf(false) }
@@ -602,13 +603,31 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
                                     Text(p.url, color = Gray, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                                 IconButton(onClick = { viewModel.loadProfile(i); showProfMgr = false }) { Icon(Icons.Default.PlayArrow, Strings["load"], tint = Green) }
-                                IconButton(onClick = { viewModel.deleteProfile(i) }) { Icon(Icons.Default.Delete, Strings["delete"], tint = Red) }
+                                IconButton(onClick = { pendingDeleteProfile = p }) { Icon(Icons.Default.Delete, Strings["delete"], tint = Red) }
                             }
                         }
                     }
                 }
             },
             confirmButton = { TextButton(onClick = { showProfMgr = false }) { Text(Strings["close"], color = Cyan) } })
+    }
+    pendingDeleteProfile?.let { profile ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteProfile = null },
+            containerColor = CardBg,
+            title = { Text(Strings["delete"], color = Red, fontWeight = FontWeight.Bold) },
+            text = { Text(Strings.fmt("confirmDeleteProfileNamed", profile.name), color = White) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val index = profiles.indexOfFirst { it.name == profile.name }
+                    if (index >= 0) viewModel.deleteProfile(index)
+                    pendingDeleteProfile = null
+                }) { Text(Strings["delete"], color = Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteProfile = null }) { Text(Strings["cancel"], color = Gray) }
+            }
+        )
     }
 
     // Settings dialog
@@ -799,7 +818,7 @@ fun ChannelListView(viewModel: MainViewModel, tab: String, query: String, onPlay
         val useTvGrid = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE && configuration.screenWidthDp >= 960
         if (query.isNotBlank() && filtered.isEmpty() && !searchLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Nessun risultato", color = Gray, fontSize = 14.sp)
+                Text(Strings["noResults"], color = Gray, fontSize = 14.sp)
             }
             return
         }
@@ -890,7 +909,7 @@ fun GridView(viewModel: MainViewModel, tab: String, query: String, onPlay: () ->
         val filtered = if (query.isBlank()) items else searchResults
         if (query.isNotBlank() && filtered.isEmpty() && !searchLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Nessun risultato", color = Gray, fontSize = 14.sp)
+                Text(Strings["noResults"], color = Gray, fontSize = 14.sp)
             }
             return
         }

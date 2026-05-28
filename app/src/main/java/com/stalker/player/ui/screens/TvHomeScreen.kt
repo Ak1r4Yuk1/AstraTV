@@ -50,6 +50,21 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.launch
 
+private data class TvLanguageOption(
+    val code: String,
+    val flag: String,
+    val nativeName: String
+)
+
+private val tvLanguageOptions = listOf(
+    TvLanguageOption("it", "\uD83C\uDDEE\uD83C\uDDF9", "Italiano"),
+    TvLanguageOption("en", "\uD83C\uDDEC\uD83C\uDDE7", "English"),
+    TvLanguageOption("fr", "\uD83C\uDDEB\uD83C\uDDF7", "Français"),
+    TvLanguageOption("de", "\uD83C\uDDE9\uD83C\uDDEA", "Deutsch"),
+    TvLanguageOption("es", "\uD83C\uDDEA\uD83C\uDDF8", "Español"),
+    TvLanguageOption("ru", "\uD83C\uDDF7\uD83C\uDDFA", "Русский")
+)
+
 @Composable
 fun TvHomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
     val context = LocalContext.current
@@ -63,6 +78,7 @@ fun TvHomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
     val remoteCode by viewModel.remoteImportCode.collectAsState()
     val error by viewModel.error.collectAsState()
     val remoteMessage by viewModel.remoteImportMessage.collectAsState()
+    val currentLang by viewModel.appLanguage.collectAsState()
     val movie by viewModel.selectedMovie.collectAsState()
     val series by viewModel.selectedSeries.collectAsState()
     val playerActive by viewModel.playerActive.collectAsState()
@@ -72,6 +88,7 @@ fun TvHomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var searchQ by remember { mutableStateOf("") }
     var lastBackAt by remember { mutableLongStateOf(0L) }
+    var showSettings by remember { mutableStateOf(false) }
     val tabKeys = listOf("Live", "Movies", "Series", "Info")
     val searchFocusRequester = remember { FocusRequester() }
     LaunchedEffect(connected) {
@@ -146,6 +163,7 @@ fun TvHomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
                 profiles = profiles,
                 remoteUrl = remoteUrl,
                 selectedTab = selectedTab,
+                onSettings = { showSettings = true },
                 onTab = {
                     selectedTab = it
                     searchQ = ""
@@ -193,9 +211,49 @@ fun TvHomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
         if (isLoading) {
             TvLoadingOverlay(
                 progress = progress,
-                message = if (connected) "Caricamento in corso..." else "Accesso in corso..."
+                message = if (connected) Strings["loadingInProgress"] else Strings["loginInProgress"]
             )
         }
+    }
+
+    if (showSettings) {
+        AlertDialog(
+            onDismissRequest = { showSettings = false },
+            containerColor = CardBg,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Settings, null, tint = Cyan)
+                    Spacer(Modifier.width(8.dp))
+                    Text(Strings["settings"], color = Cyan, fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(Strings["language"], color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    tvLanguageOptions.forEach { option ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable {
+                                viewModel.setLanguage(option.code)
+                                showSettings = false
+                            },
+                            color = if (currentLang == option.code) Cyan.copy(alpha = 0.18f) else Bg,
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, if (currentLang == option.code) Cyan else Cyan.copy(alpha = 0.12f))
+                        ) {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(option.flag, fontSize = 20.sp)
+                                Spacer(Modifier.width(10.dp))
+                                Text(option.nativeName, color = White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                if (currentLang == option.code) Icon(Icons.Default.Check, null, tint = Cyan)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSettings = false }) { Text(Strings["close"], color = Cyan) }
+            }
+        )
     }
 }
 
@@ -205,6 +263,7 @@ private fun TvSidebar(
     profiles: List<Profile>,
     remoteUrl: String,
     selectedTab: Int,
+    onSettings: () -> Unit,
     onTab: (Int) -> Unit,
     onProfile: (Int) -> Unit,
     onDisconnect: () -> Unit
@@ -220,26 +279,32 @@ private fun TvSidebar(
             Icon(painterResource(R.drawable.ic_brand_mark), null, tint = Color.Unspecified, modifier = Modifier.size(54.dp))
             Spacer(Modifier.width(12.dp))
             Column {
-                Text("AstraTV", color = White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                Text("Android TV", color = Cyan, fontSize = 13.sp)
+                Text(Strings["tvApp"], color = White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text(Strings["tvSubtitle"], color = Cyan, fontSize = 13.sp)
             }
         }
 
         if (connected) {
-            listOf(Icons.Default.LiveTv to "Live", Icons.Default.Movie to "Film", Icons.Default.Tv to "Serie", Icons.Default.Info to "Info").forEachIndexed { index, item ->
+            listOf(
+                Icons.Default.LiveTv to Strings["live"],
+                Icons.Default.Movie to Strings["movies"],
+                Icons.Default.Tv to Strings["series"],
+                Icons.Default.Info to Strings["info"]
+            ).forEachIndexed { index, item ->
                 val selected = selectedTab == index
                 TvMenuButton(text = item.second, icon = item.first, selected = selected, onClick = { onTab(index) })
             }
+            TvMenuButton(text = Strings["settings"], icon = Icons.Default.Settings, selected = false, onClick = onSettings)
             Spacer(Modifier.weight(1f))
             OutlinedButton(onClick = onDisconnect, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = Red), border = BorderStroke(1.dp, Red.copy(alpha = 0.35f))) {
                 Icon(Icons.Default.Close, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Disconnetti")
+                Text(Strings["disconnect"])
             }
         } else {
-            Text("Profili", color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(Strings["profiles"], color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
-                if (profiles.isEmpty()) item { Text("Nessun profilo salvato", color = Gray, fontSize = 14.sp) }
+                if (profiles.isEmpty()) item { Text(Strings["noProfiles"], color = Gray, fontSize = 14.sp) }
                 items(profiles.size) { index ->
                     val profile = profiles[index]
                     val modifier = if (index == 0) Modifier.focusRequester(firstProfileFocusRequester) else Modifier
@@ -251,6 +316,12 @@ private fun TvSidebar(
                         }
                     }
                 }
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = onSettings, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = Cyan), border = BorderStroke(1.dp, Cyan.copy(alpha = 0.22f))) {
+                Icon(Icons.Default.Settings, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(Strings["settings"])
             }
         }
     }
@@ -307,7 +378,7 @@ private fun TvLoadingOverlay(progress: Int, message: String) {
             ) {
                 CircularProgressIndicator(color = Cyan, strokeWidth = 4.dp)
                 Text(message, color = White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text("Attendere prego", color = Gray, fontSize = 14.sp)
+                Text(Strings["pleaseWaitLong"], color = Gray, fontSize = 14.sp)
                 if (progress > 0) {
                     LinearProgressIndicator(
                         progress = { progress.coerceIn(0, 100) / 100f },
@@ -330,17 +401,17 @@ private fun TvSetupPanel(remoteUrl: String, remoteCode: String) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text("Aggiungi liste da telefono o PC", color = White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text(Strings["addListsFromBrowser"], color = White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(12.dp))
             QrCodeImage(remoteUrl, Modifier.size(190.dp))
             Spacer(Modifier.height(14.dp))
-            Text("URL:", color = Gray, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(Strings["urlLabel"], color = Gray, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             Surface(color = Bg, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, Cyan.copy(alpha = 0.28f))) {
-                Text(remoteUrl.ifBlank { "Server in avvio..." }, color = Green, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 560.dp).padding(horizontal = 16.dp, vertical = 10.dp))
+                Text(remoteUrl.ifBlank { Strings["serverStarting"] }, color = Green, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 560.dp).padding(horizontal = 16.dp, vertical = 10.dp))
             }
             Spacer(Modifier.height(12.dp))
-            Text("CODICE:", color = Gray, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(Strings["codeLabel"], color = Gray, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             Surface(color = Cyan, shape = RoundedCornerShape(16.dp)) {
                 Text(remoteCode, color = Bg, fontSize = 28.sp, fontWeight = FontWeight.Black, letterSpacing = 4.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 7.dp))
@@ -403,7 +474,7 @@ private fun TvLiveGrid(viewModel: MainViewModel, query: String, autoFocusResults
     }
     if (query.isNotBlank() && items.isEmpty() && !searchLoading) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Nessun risultato", color = Gray, fontSize = 16.sp)
+            Text(Strings["noResults"], color = Gray, fontSize = 16.sp)
         }
         return
     }
@@ -450,7 +521,7 @@ private fun TvPosterGrid(viewModel: MainViewModel, query: String, isSeries: Bool
     }
     if (query.isNotBlank() && items.isEmpty() && !searchLoading) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Nessun risultato", color = Gray, fontSize = 16.sp)
+            Text(Strings["noResults"], color = Gray, fontSize = 16.sp)
         }
         return
     }
@@ -524,9 +595,9 @@ private fun TvMovieDetailDialog(item: Channel, onPlay: () -> Unit, onClose: () -
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TvMetaChips(item, compact = true)
                     HorizontalDivider(color = Cyan.copy(alpha = 0.10f))
-                    TvFact("Anno", item.year)
-                    TvFact("Durata", tvFormatDurationLabel(item))
-                    TvFact("Eta", item.age)
+                    TvFact(Strings["year"], item.year)
+                    TvFact(Strings["duration"], tvFormatDurationLabel(item))
+                    TvFact(Strings["ageShort"], item.age)
                     TvFact("IMDb", item.ratingImdb)
                 }
             }
@@ -536,7 +607,7 @@ private fun TvMovieDetailDialog(item: Channel, onPlay: () -> Unit, onClose: () -
                 TextButton(onClick = onClose, modifier = Modifier.focusRequester(backFocusRequester)) {
                     Icon(Icons.Default.ArrowBack, null, tint = Cyan)
                     Spacer(Modifier.width(6.dp))
-                    Text("Indietro", color = Cyan, fontSize = 15.sp)
+                    Text(Strings["back"], color = Cyan, fontSize = 15.sp)
                 }
                 Spacer(Modifier.width(8.dp))
                 Text(item.name, color = White, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
@@ -544,10 +615,10 @@ private fun TvMovieDetailDialog(item: Channel, onPlay: () -> Unit, onClose: () -
             Spacer(Modifier.height(8.dp))
             Surface(Modifier.fillMaxWidth().heightIn(min = 112.dp, max = 180.dp), color = CardBg, shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, Cyan.copy(alpha = 0.08f))) {
                 Column(Modifier.fillMaxSize().padding(14.dp)) {
-                    Text("Trama", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(Strings["plot"], color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        item.description.ifBlank { "Nessuna descrizione disponibile." },
+                        item.description.ifBlank { Strings["noDescription"] },
                         color = White.copy(alpha = 0.86f),
                         fontSize = 13.sp,
                         lineHeight = 18.sp,
@@ -560,7 +631,7 @@ private fun TvMovieDetailDialog(item: Channel, onPlay: () -> Unit, onClose: () -
             Button(onClick = onPlay, modifier = Modifier.width(188.dp).height(48.dp), colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Bg)) {
                 Icon(Icons.Default.PlayArrow, null)
                 Spacer(Modifier.width(8.dp))
-                Text("Riproduci", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(Strings["play"], fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -593,9 +664,9 @@ private fun TvSeriesDetailDialog(viewModel: MainViewModel, item: Channel, onPlay
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TvMetaChips(item, compact = true)
                     HorizontalDivider(color = Cyan.copy(alpha = 0.10f))
-                    TvFact("Anno", item.year)
-                    TvFact("Durata", tvFormatDurationLabel(item))
-                    TvFact("Eta", item.age)
+                    TvFact(Strings["year"], item.year)
+                    TvFact(Strings["duration"], tvFormatDurationLabel(item))
+                    TvFact(Strings["ageShort"], item.age)
                     TvFact("IMDb", item.ratingImdb)
                 }
             }
@@ -605,18 +676,18 @@ private fun TvSeriesDetailDialog(viewModel: MainViewModel, item: Channel, onPlay
                 TextButton(onClick = onBack, modifier = Modifier.focusRequester(backFocusRequester)) {
                     Icon(Icons.Default.ArrowBack, null, tint = Cyan)
                     Spacer(Modifier.width(6.dp))
-                    Text("Indietro", color = Cyan, fontSize = 15.sp)
+                    Text(Strings["back"], color = Cyan, fontSize = 15.sp)
                 }
                 Spacer(Modifier.width(8.dp))
                 Text(item.name, color = White, fontSize = 23.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 if (currentView == "episodes") {
-                    TextButton(onClick = { viewModel.goBack() }) { Text("Stagioni", color = Cyan) }
+                    TextButton(onClick = { viewModel.goBack() }) { Text(Strings["seasons"], color = Cyan) }
                 }
             }
             Spacer(Modifier.height(8.dp))
             Surface(Modifier.fillMaxWidth().heightIn(min = 104.dp, max = 136.dp), color = CardBg, shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, Cyan.copy(alpha = 0.08f))) {
                 Column(Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    Text("Trama", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(Strings["plot"], color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     if (item.description.isNotBlank()) {
                         Spacer(Modifier.height(6.dp))
                         Text(item.description, color = White.copy(alpha = 0.82f), fontSize = 12.sp, lineHeight = 16.sp, maxLines = 5, overflow = TextOverflow.Ellipsis)
@@ -626,12 +697,12 @@ private fun TvSeriesDetailDialog(viewModel: MainViewModel, item: Channel, onPlay
             Spacer(Modifier.height(10.dp))
             Surface(Modifier.fillMaxWidth().weight(1f), color = CardBg, shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, Cyan.copy(alpha = 0.08f))) {
                 Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp)) {
-                    Text(if (currentView == "episodes") "Episodi" else "Stagioni", color = if (currentView == "episodes") Green else Purple, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(if (currentView == "episodes") Strings["episodes"] else Strings["seasons"], color = if (currentView == "episodes") Green else Purple, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(6.dp))
                     if (currentView == "episodes") {
-                        TvEpisodeList(items = episodes, emptyText = "Nessun episodio disponibile", requestInitialFocus = true, modifier = Modifier.weight(1f)) { episode -> viewModel.startPlayback(episode, onPlay) }
+                        TvEpisodeList(items = episodes, emptyText = Strings["noEpisodesAvailable"], requestInitialFocus = true, modifier = Modifier.weight(1f)) { episode -> viewModel.startPlayback(episode, onPlay) }
                     } else {
-                        TvEpisodeList(items = seasons, emptyText = "Nessuna stagione disponibile", requestInitialFocus = true, modifier = Modifier.weight(1f)) { season -> viewModel.onSeasonClick(season) }
+                        TvEpisodeList(items = seasons, emptyText = Strings["noSeasonsAvailable"], requestInitialFocus = true, modifier = Modifier.weight(1f)) { season -> viewModel.onSeasonClick(season) }
                     }
                 }
             }
@@ -676,8 +747,8 @@ private fun TvMetaChips(item: Channel, compact: Boolean = false) {
             }
         }
         if (item.genresStr.isNotBlank()) Text(item.genresStr, color = White, fontSize = if (compact) 12.sp else 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (item.director.isNotBlank()) Text("Regia: ${item.director}", color = Gray, fontSize = if (compact) 11.sp else 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (item.actors.isNotBlank()) Text("Cast: ${item.actors}", color = Gray, fontSize = if (compact) 11.sp else 12.sp, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis)
+        if (item.director.isNotBlank()) Text("${Strings["directedBy"]}: ${item.director}", color = Gray, fontSize = if (compact) 11.sp else 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (item.actors.isNotBlank()) Text("${Strings["cast"]}: ${item.actors}", color = Gray, fontSize = if (compact) 11.sp else 12.sp, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -709,7 +780,7 @@ private fun TvMeta(item: Channel) {
         if (item.genresStr.isNotBlank()) Text(item.genresStr, color = Gray, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         val duration = tvFormatDurationLabel(item)
         if (duration.isNotBlank()) Text(duration, color = Gray, fontSize = 13.sp)
-        if (item.actors.isNotBlank()) Text("Cast: ${item.actors}", color = Gray, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        if (item.actors.isNotBlank()) Text("${Strings["cast"]}: ${item.actors}", color = Gray, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -729,7 +800,7 @@ private fun TvEpisodeRow(item: Channel, modifier: Modifier = Modifier, onClick: 
         Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(if (item.itemType == "season") Icons.Default.Folder else Icons.Default.PlayArrow, null, tint = if (item.itemType == "season") Purple else Green, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text(item.name.ifBlank { if (item.itemType == "season") "Stagione ${item.seasonNumber}" else "Episodio ${item.episodeNumber}" }, color = White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(item.name.ifBlank { if (item.itemType == "season") Strings.seasonName(item.seasonNumber) else Strings.episodeName(item.episodeNumber) }, color = White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         }
     }
 }
