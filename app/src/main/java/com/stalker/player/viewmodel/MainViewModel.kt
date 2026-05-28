@@ -12,16 +12,20 @@ import com.stalker.player.data.repository.StalkerRepository
 import com.stalker.player.data.model.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlin.random.Random
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val client = StalkerApiClient()
     private val xtreamClient = XtreamClient()
     private val m3uClient = M3uClient(application)
-    private val repository = StalkerRepository(client, xtreamClient, m3uClient)
+    private val repository = StalkerRepository(application, client, xtreamClient, m3uClient)
     private val settingsManager = SettingsManager(application)
     private val remoteAccessCode = Random.nextInt(100_000, 1_000_000).toString()
     private val remoteImportServer = RemoteImportServer(
@@ -41,6 +45,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val channels get() = repository.channels
     val seasons get() = repository.seasons
     val episodes get() = repository.episodes
+    val searchResults get() = repository.searchResults
+    val searchLoading get() = repository.searchLoading
 
     val portalType = MutableStateFlow("mac")
     val profiles = MutableStateFlow<List<Profile>>(emptyList())
@@ -64,6 +70,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var currentCategory: Category? = null
     private var activeTab = "Live"
+    private var searchJob: Job? = null
 
     init {
         loadProfiles()
@@ -89,6 +96,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             currentView.value = "categories"
             navStack.clear()
             navStackFlow.value = emptyList()
+            clearSearch()
         }
     }
 
@@ -110,6 +118,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearError() { repository.setError("") }
+
+    fun updateSearch(tab: String, query: String) {
+        searchJob?.cancel()
+        if (query.isBlank()) {
+            repository.clearSearch()
+            return
+        }
+        searchJob = viewModelScope.launch {
+            delay(300)
+            repository.search(tab, query)
+        }
+    }
+
+    fun clearSearch() {
+        searchJob?.cancel()
+        repository.clearSearch()
+    }
     
     fun detectPortalType(url: String) = when {
         url.contains("player_api") -> "xtream"
@@ -142,26 +167,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                val finalUrl = currentHostname.value
+                withTimeout(10_000L) {
+                    val finalUrl = currentHostname.value
 
-                // Configura SOLO ed esclusivamente il client scelto
-                when (selectedType) {
-                    "xtream" -> repository.configureXtream(finalUrl, currentUsername.value, currentPassword.value)
-                    "m3u" -> repository.configureM3u(finalUrl) 
-                    else -> repository.configure(finalUrl, currentMac.value, selectedType)
+                    // Configura SOLO ed esclusivamente il client scelto
+                    when (selectedType) {
+                        "xtream" -> repository.configureXtream(finalUrl, currentUsername.value, currentPassword.value)
+                        "m3u" -> repository.configureM3u(finalUrl) 
+                        else -> repository.configure(finalUrl, currentMac.value, selectedType)
+                    }
+
+                    // Esegue il caricamento. Se fallisce, restituisce l'errore del client specifico
+                    val loadResult = repository.loadPlaylist()
+
+                    loadResult
+                        .onSuccess { 
+                            connected.value = true
+                            viewModelScope.launch {
+                                repository.warmupSearchIndex()
+                            }
+                        }
+                        .onFailure { e -> 
+                            if (e !is CancellationException) repository.setError(e.message ?: e.toString()) 
+                        }
                 }
-
-                // Esegue il caricamento. Se fallisce, restituisce l'errore del client specifico
-                val loadResult = repository.loadPlaylist()
-
-                loadResult
-                    .onSuccess { 
-                        connected.value = true 
-                    }
-                    .onFailure { e -> 
-                        if (e !is CancellationException) repository.setError(e.message ?: e.toString()) 
-                    }
-
+            } catch (_: TimeoutCancellationException) {
+                connected.value = false
+                repository.setError("Timeout di connessione: login annullato dopo 10 secondi")
             } catch (e: CancellationException) { 
             } catch (e: Exception) { 
                 repository.setError(e.message ?: e.toString()) 

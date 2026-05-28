@@ -68,12 +68,40 @@ fun TvHomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
     val playerActive by viewModel.playerActive.collectAsState()
     val currentView by viewModel.currentView.collectAsState()
     val navStack by viewModel.navStackFlow.collectAsState()
+    val searchLoading by viewModel.searchLoading.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) }
+    var searchQ by remember { mutableStateOf("") }
     var lastBackAt by remember { mutableLongStateOf(0L) }
+    val tabKeys = listOf("Live", "Movies", "Series", "Info")
+    val searchFocusRequester = remember { FocusRequester() }
     LaunchedEffect(connected) {
         if (connected) {
             selectedTab = 0
-            viewModel.setActiveTab(Strings["live"])
+            viewModel.setActiveTab(tabKeys[0])
+            searchQ = ""
+        }
+    }
+    LaunchedEffect(selectedTab, connected, searchQ) {
+        if (connected && selectedTab < 3) {
+            viewModel.updateSearch(tabKeys[selectedTab], searchQ)
+        } else {
+            viewModel.clearSearch()
+        }
+    }
+    LaunchedEffect(error) {
+        if (!error.isNullOrBlank()) {
+            kotlinx.coroutines.delay(3_000)
+            if (viewModel.error.value == error) {
+                viewModel.clearError()
+            }
+        }
+    }
+    LaunchedEffect(remoteMessage) {
+        if (remoteMessage.isNotBlank()) {
+            kotlinx.coroutines.delay(3_000)
+            if (viewModel.remoteImportMessage.value == remoteMessage) {
+                viewModel.clearRemoteImportMessage()
+            }
         }
     }
     val handleBack: () -> Unit = {
@@ -120,7 +148,8 @@ fun TvHomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
                 selectedTab = selectedTab,
                 onTab = {
                     selectedTab = it
-                    viewModel.setActiveTab(listOf(Strings["live"], Strings["movies"], Strings["series"], Strings["info"])[it])
+                    searchQ = ""
+                    viewModel.setActiveTab(tabKeys[it])
                 },
                 onProfile = { index -> viewModel.connectProfile(index) },
                 onDisconnect = { viewModel.disconnect() }
@@ -132,10 +161,29 @@ fun TvHomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
                 if (!connected) {
                     TvSetupPanel(remoteUrl = remoteUrl, remoteCode = remoteCode)
                 } else {
+                    if (selectedTab < 3 && currentView != "seasons" && currentView != "episodes") {
+                        OutlinedTextField(
+                            value = searchQ,
+                            onValueChange = { searchQ = it },
+                            placeholder = { Text(Strings["search"], color = Gray) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().focusRequester(searchFocusRequester),
+                            colors = fieldColors(),
+                            leadingIcon = { Icon(Icons.Default.Search, null, tint = Gray) },
+                            trailingIcon = {
+                                when {
+                                    searchLoading -> CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Cyan, strokeWidth = 2.dp)
+                                    searchQ.isNotBlank() -> IconButton(onClick = { searchQ = "" }) { Icon(Icons.Default.Clear, null, tint = Gray) }
+                                }
+                            },
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
                     when (selectedTab) {
-                        0 -> TvLiveGrid(viewModel, onPlay)
-                        1 -> TvPosterGrid(viewModel, isSeries = false, onPlay = onPlay)
-                        2 -> TvPosterGrid(viewModel, isSeries = true, onPlay = onPlay)
+                        0 -> TvLiveGrid(viewModel = viewModel, query = searchQ, autoFocusResults = searchQ.isBlank(), onPlay = onPlay)
+                        1 -> TvPosterGrid(viewModel = viewModel, query = searchQ, isSeries = false, autoFocusResults = searchQ.isBlank(), onPlay = onPlay)
+                        2 -> TvPosterGrid(viewModel = viewModel, query = searchQ, isSeries = true, autoFocusResults = searchQ.isBlank(), onPlay = onPlay)
                         else -> InfoTab(viewModel)
                     }
                 }
@@ -333,20 +381,35 @@ private fun createQrBitmap(text: String, size: Int): Bitmap {
 }
 
 @Composable
-private fun TvLiveGrid(viewModel: MainViewModel, onPlay: () -> Unit) {
+private fun TvLiveGrid(viewModel: MainViewModel, query: String, autoFocusResults: Boolean, onPlay: () -> Unit) {
     val cv by viewModel.currentView.collectAsState()
     val channels by viewModel.channels.collectAsState()
     val categories by viewModel.categories.collectAsState()
+    val searchResults by viewModel.searchResults.collectAsState()
+    val searchLoading by viewModel.searchLoading.collectAsState()
     val scope = rememberCoroutineScope()
-    val items = if (cv == "channels") channels else (categories["Live"] ?: emptyList()).map { Channel(id = it.categoryId, name = it.name, itemType = "category", categoryType = it.categoryType) }
-    if (cv != "channels") {
+    val items = if (query.isNotBlank()) {
+        searchResults
+    } else if (cv == "channels") {
+        channels
+    } else {
+        (categories["Live"] ?: emptyList()).map { Channel(id = it.categoryId, name = it.name, itemType = "category", categoryType = it.categoryType) }
+    }
+    if (query.isBlank() && cv != "channels") {
         TvCategoryList(items = items, requestInitialFocus = true) { item ->
             scope.launch { viewModel.onCategoryClick(Category(item.name, item.categoryType, item.id)) }
         }
         return
     }
+    if (query.isNotBlank() && items.isEmpty() && !searchLoading) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Nessun risultato", color = Gray, fontSize = 16.sp)
+        }
+        return
+    }
     val firstItemFocusRequester = remember { FocusRequester() }
-    LaunchedEffect(items.size, cv) {
+    LaunchedEffect(items.size, cv, autoFocusResults, query) {
+        if (!autoFocusResults || query.isNotBlank()) return@LaunchedEffect
         if (items.isNotEmpty()) firstItemFocusRequester.requestFocus()
     }
     LazyVerticalGrid(columns = GridCells.Adaptive(250.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -364,21 +427,36 @@ private fun TvLiveGrid(viewModel: MainViewModel, onPlay: () -> Unit) {
 }
 
 @Composable
-private fun TvPosterGrid(viewModel: MainViewModel, isSeries: Boolean, onPlay: () -> Unit) {
+private fun TvPosterGrid(viewModel: MainViewModel, query: String, isSeries: Boolean, autoFocusResults: Boolean, onPlay: () -> Unit) {
     val cv by viewModel.currentView.collectAsState()
     val channels by viewModel.channels.collectAsState()
     val categories by viewModel.categories.collectAsState()
+    val searchResults by viewModel.searchResults.collectAsState()
+    val searchLoading by viewModel.searchLoading.collectAsState()
     val scope = rememberCoroutineScope()
     val tab = if (isSeries) "Series" else "Movies"
-    val items = if (cv == "channels") channels else (categories[tab] ?: emptyList()).map { Channel(id = it.categoryId, name = it.name, itemType = "category", categoryType = it.categoryType) }
-    if (cv != "channels") {
+    val items = if (query.isNotBlank()) {
+        searchResults
+    } else if (cv == "channels") {
+        channels
+    } else {
+        (categories[tab] ?: emptyList()).map { Channel(id = it.categoryId, name = it.name, itemType = "category", categoryType = it.categoryType) }
+    }
+    if (query.isBlank() && cv != "channels") {
         TvCategoryList(items = items, requestInitialFocus = true) { item ->
             scope.launch { viewModel.onCategoryClick(Category(item.name, if (isSeries) "Series" else "VOD", item.id)) }
         }
         return
     }
+    if (query.isNotBlank() && items.isEmpty() && !searchLoading) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Nessun risultato", color = Gray, fontSize = 16.sp)
+        }
+        return
+    }
     val firstItemFocusRequester = remember { FocusRequester() }
-    LaunchedEffect(items.size, cv, isSeries) {
+    LaunchedEffect(items.size, cv, isSeries, autoFocusResults, query) {
+        if (!autoFocusResults || query.isNotBlank()) return@LaunchedEffect
         if (items.isNotEmpty()) firstItemFocusRequester.requestFocus()
     }
     LazyVerticalGrid(columns = GridCells.Adaptive(165.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(4.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {

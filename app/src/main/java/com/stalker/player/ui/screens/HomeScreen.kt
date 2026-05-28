@@ -99,6 +99,7 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
     var searchQ by remember { mutableStateOf("") }
     var connectPending by remember { mutableStateOf(false) }
     val tabs = listOf(Strings["live"], Strings["movies"], Strings["series"], Strings["info"])
+    val tabKeys = listOf("Live", "Movies", "Series", "Info")
     val context = LocalContext.current
     val activity = context as? Activity
     val rootView = LocalView.current
@@ -130,6 +131,8 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
     val currentMac by viewModel.currentMac.collectAsState()
     val currentUsername by viewModel.currentUsername.collectAsState()
     val currentPassword by viewModel.currentPassword.collectAsState()
+    val searchLoading by viewModel.searchLoading.collectAsState()
+    val remoteMessage by viewModel.remoteImportMessage.collectAsState()
     val isX = portalType == "xtream"
     val isM3u = portalType == "m3u"
     val hostname = when (portalType) {
@@ -195,11 +198,40 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
         }
     }
 
-    LaunchedEffect(selTab) { viewModel.setActiveTab(tabs[selTab]); searchQ = "" }
+    LaunchedEffect(selTab) {
+        viewModel.setActiveTab(tabKeys[selTab])
+        searchQ = ""
+    }
+
+    LaunchedEffect(searchQ, selTab, connected) {
+        if (connected && selTab < 3) {
+            viewModel.updateSearch(tabKeys[selTab], searchQ)
+        } else {
+            viewModel.clearSearch()
+        }
+    }
 
     LaunchedEffect(loginLoading, connected, error, viewModel.progress.value) {
         if (loginLoading || viewModel.progress.value > 0 || connected || !error.isNullOrBlank()) {
             connectPending = false
+        }
+    }
+
+    LaunchedEffect(error) {
+        if (!error.isNullOrBlank()) {
+            kotlinx.coroutines.delay(3_000)
+            if (viewModel.error.value == error) {
+                viewModel.clearError()
+            }
+        }
+    }
+
+    LaunchedEffect(remoteMessage) {
+        if (remoteMessage.isNotBlank()) {
+            kotlinx.coroutines.delay(3_000)
+            if (viewModel.remoteImportMessage.value == remoteMessage) {
+                viewModel.clearRemoteImportMessage()
+            }
         }
     }
 
@@ -502,7 +534,12 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
         if (connected) {
             val tabIconSize = if (compactUiScale < 1f) 14.dp else 16.dp
             val tabFontSize = if (compactUiScale < 1f) 11.sp else 12.sp
-            OutlinedTextField(searchQ, { searchQ = it }, placeholder = { Text(Strings["search"], color = Gray) }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), colors = fieldColors(), leadingIcon = { Icon(Icons.Default.Search, null, tint = Gray) }, trailingIcon = { if (searchQ.isNotBlank()) { IconButton(onClick = { searchQ = "" }) { Icon(Icons.Default.Clear, null, tint = Gray) } } }, shape = RoundedCornerShape(18.dp))
+            OutlinedTextField(searchQ, { searchQ = it }, placeholder = { Text(Strings["search"], color = Gray) }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), colors = fieldColors(), leadingIcon = { Icon(Icons.Default.Search, null, tint = Gray) }, trailingIcon = {
+                when {
+                    searchLoading -> CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Cyan, strokeWidth = 2.dp)
+                    searchQ.isNotBlank() -> IconButton(onClick = { searchQ = "" }) { Icon(Icons.Default.Clear, null, tint = Gray) }
+                }
+            }, shape = RoundedCornerShape(18.dp))
             TabRow(selectedTabIndex = selTab, containerColor = Bg, contentColor = Cyan, divider = {}) {
                 val tabIcons = listOf(Icons.Default.LiveTv, Icons.Default.Movie, Icons.Default.Tv, Icons.Default.Info)
                 tabs.forEachIndexed { i, t ->
@@ -736,6 +773,8 @@ fun ChannelListView(viewModel: MainViewModel, tab: String, query: String, onPlay
     val ns by viewModel.navStackFlow.collectAsState()
     val chs by viewModel.channels.collectAsState()
     val cats by viewModel.categories.collectAsState()
+    val searchResults by viewModel.searchResults.collectAsState()
+    val searchLoading by viewModel.searchLoading.collectAsState()
     val scope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxSize()) {
@@ -756,8 +795,14 @@ fun ChannelListView(viewModel: MainViewModel, tab: String, query: String, onPlay
             "channels" -> chs
             else -> (cats[tab] ?: emptyList()).map { cat -> Channel(id = cat.categoryId, name = cat.name, itemType = "category", categoryType = cat.categoryType, screenshotUri = cat.screenshotUri) }
         }
-        val filtered = if (query.isBlank()) items else items.filter { it.name.contains(query, true) }
+        val filtered = if (query.isBlank()) items else searchResults
         val useTvGrid = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE && configuration.screenWidthDp >= 960
+        if (query.isNotBlank() && filtered.isEmpty() && !searchLoading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Nessun risultato", color = Gray, fontSize = 14.sp)
+            }
+            return
+        }
         if (useTvGrid) {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = if (cv == "channels") 300.dp else 260.dp),
@@ -826,6 +871,8 @@ fun GridView(viewModel: MainViewModel, tab: String, query: String, onPlay: () ->
     val ns by viewModel.navStackFlow.collectAsState()
     val chs by viewModel.channels.collectAsState()
     val cats by viewModel.categories.collectAsState()
+    val searchResults by viewModel.searchResults.collectAsState()
+    val searchLoading by viewModel.searchLoading.collectAsState()
     val scope = rememberCoroutineScope()
     val minGridCardWidth = if (configuration.screenWidthDp >= 840) 200.dp else if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) 168.dp else 148.dp
 
@@ -840,8 +887,15 @@ fun GridView(viewModel: MainViewModel, tab: String, query: String, onPlay: () ->
             "channels" -> chs
             else -> (cats[tab] ?: emptyList()).map { cat -> Channel(id = cat.categoryId, name = cat.name, itemType = "category", screenshotUri = cat.screenshotUri) }
         }
-        val filtered = if (query.isBlank()) items else items.filter { it.name.contains(query, true) }
-        if (cv == "channels") {
+        val filtered = if (query.isBlank()) items else searchResults
+        if (query.isNotBlank() && filtered.isEmpty() && !searchLoading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Nessun risultato", color = Gray, fontSize = 14.sp)
+            }
+            return
+        }
+        val showPosterResults = query.isNotBlank() || cv == "channels"
+        if (showPosterResults) {
             LazyVerticalGrid(columns = GridCells.Adaptive(minSize = minGridCardWidth), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(filtered) { item ->
                     Card(Modifier.fillMaxWidth().clickable { scope.launch { if (isSeries) viewModel.onSeriesClick(item) else viewModel.onVodClick(item) } }, colors = CardDefaults.cardColors(containerColor = CardBg), shape = RoundedCornerShape(20.dp), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {

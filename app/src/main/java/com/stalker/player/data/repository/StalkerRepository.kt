@@ -1,5 +1,6 @@
 package com.stalker.player.data.repository
 
+import android.content.Context
 import com.google.gson.JsonParser
 import com.stalker.player.data.api.StalkerApiClient
 import com.stalker.player.data.api.XtreamClient
@@ -15,6 +16,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 class StalkerRepository(
+    context: Context,
     private val client: StalkerApiClient,
     private val xtreamClient: XtreamClient,
     private val m3uClient: M3uClient
@@ -35,6 +37,10 @@ class StalkerRepository(
     val seasons: StateFlow<List<Channel>> = _seasons
     private val _episodes = MutableStateFlow<List<Channel>>(emptyList())
     val episodes: StateFlow<List<Channel>> = _episodes
+    private val _searchResults = MutableStateFlow<List<Channel>>(emptyList())
+    val searchResults: StateFlow<List<Channel>> = _searchResults
+    private val _searchLoading = MutableStateFlow(false)
+    val searchLoading: StateFlow<Boolean> = _searchLoading
 
     private var portalType = "mac"
     private var portalUrl = ""
@@ -59,6 +65,7 @@ class StalkerRepository(
     private val m3uSeriesEpisodesBySeriesId = mutableMapOf<String, List<Channel>>()
     private val vodInfoCache = mutableMapOf<String, Channel>()
     private val seriesInfoCache = mutableMapOf<String, Channel>()
+    private val searchIndexStore = SearchIndexStore(context.applicationContext)
     
     private val epgWorker = EpgWorker(fetcher = { channelId, _ ->
         currentXtreamCredential()?.let { credential ->
@@ -188,6 +195,51 @@ class StalkerRepository(
         _progress.value = 90
     }
 
+    suspend fun warmupSearchIndex() = withContext(Dispatchers.IO) {
+        runCatching {
+            when (portalType) {
+                "xtream" -> refreshXtreamSearchIndex(portalUrl, xtreamUser, xtreamPass)
+                "m3u" -> m3uXtreamCredential?.let { credential ->
+                    refreshXtreamSearchIndex(credential.serverUrl, credential.username, credential.password)
+                }
+            }
+        }
+    }
+
+    suspend fun search(tab: String, query: String): Result<List<Channel>> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) {
+            _searchLoading.value = false
+            _searchResults.value = emptyList()
+            return@withContext Result.success(emptyList())
+        }
+
+        _searchLoading.value = true
+        try {
+            val results = when (portalType) {
+                "xtream" -> searchXtream(tab, query, XtreamCredential(portalUrl, xtreamUser, xtreamPass))
+                "m3u" -> m3uXtreamCredential?.let { credential ->
+                    searchXtream(tab, query, credential)
+                } ?: searchM3u(tab, query)
+                else -> searchStb(tab, query)
+            }
+            _searchResults.value = filterVisibleItems(results)
+            _searchLoading.value = false
+            Result.success(results)
+        } catch (_: CancellationException) {
+            _searchLoading.value = false
+            Result.failure(CancellationException())
+        } catch (e: Exception) {
+            _searchLoading.value = false
+            _error.value = e.message ?: e.toString()
+            Result.failure(e)
+        }
+    }
+
+    fun clearSearch() {
+        _searchLoading.value = false
+        _searchResults.value = emptyList()
+    }
+
     suspend fun loadChannels(cat: Category): Result<List<Channel>> = withContext(Dispatchers.IO) {
         val requestVersion = ++channelLoadVersion
         _isLoading.value = true
@@ -222,16 +274,17 @@ class StalkerRepository(
                 }
                 else -> client.getChannels(token!!, portalUrl, portalMac, cat, portalType) { partial ->
                     if (requestVersion == channelLoadVersion) {
-                        _channels.value = partial
+                        _channels.value = filterVisibleItems(partial)
                     }
                 }
             }
-            channelCache[cacheKey] = chs
+            val visibleChannels = filterVisibleItems(chs)
+            channelCache[cacheKey] = visibleChannels
             if (requestVersion == channelLoadVersion) {
-                _channels.value = chs
+                _channels.value = visibleChannels
                 _isLoading.value = false
             }
-            Result.success(chs)
+            Result.success(visibleChannels)
         } catch (e: Exception) {
             _error.value = e.message ?: e.toString()
             if (requestVersion == channelLoadVersion) {
@@ -559,6 +612,79 @@ class StalkerRepository(
         m3uChannelsByCategory.clear()
         m3uSeriesEpisodesBySeriesId.clear()
         epgWorker.clear()
+        clearSearch()
+    }
+
+    private suspend fun refreshXtreamSearchIndex(serverUrl: String, username: String, password: String) {
+        val portalKey = buildXtreamPortalKey(serverUrl, username, password)
+        val indexed = coroutineScope {
+            listOf(
+                async { xtreamClient.getAllLiveStreams(serverUrl, username, password) },
+                async { xtreamClient.getAllVodStreams(serverUrl, username, password) },
+                async { xtreamClient.getAllSeries(serverUrl, username, password) }
+            ).awaitAll()
+        }
+        searchIndexStore.replaceIndex(portalKey, "channel", filterVisibleItems(indexed[0]))
+        searchIndexStore.replaceIndex(portalKey, "vod", filterVisibleItems(indexed[1]))
+        searchIndexStore.replaceIndex(portalKey, "series", filterVisibleItems(indexed[2]))
+    }
+
+    private suspend fun searchStb(tab: String, query: String): List<Channel> {
+        val resolvedToken = token ?: throw IOException("Sessione STB non disponibile")
+        val apiType = when (tab) {
+            "Movies" -> "vod"
+            "Series" -> "series"
+            else -> "itv"
+        }
+        return filterVisibleItems(client.search(resolvedToken, portalUrl, portalMac, apiType, query, portalType))
+    }
+
+    private fun searchXtream(tab: String, query: String, credential: XtreamCredential): List<Channel> {
+        val itemType = when (tab) {
+            "Movies" -> "vod"
+            "Series" -> "series"
+            else -> "channel"
+        }
+        return filterVisibleItems(searchIndexStore.search(
+            portalKey = buildXtreamPortalKey(credential.serverUrl, credential.username, credential.password),
+            itemType = itemType,
+            query = query
+        ))
+    }
+
+    private fun searchM3u(tab: String, query: String): List<Channel> {
+        val normalized = query.trim()
+        if (normalized.isBlank()) return emptyList()
+        val matcher: (Channel) -> Boolean = { item -> item.name.contains(normalized, ignoreCase = true) }
+        return when (tab) {
+            "Movies" -> m3uChannelsByCategory.values.flatten()
+                .filter { it.itemType == "vod" && matcher(it) }
+                .filter(::isVisibleItem)
+                .sortedBy { it.name.lowercase() }
+            "Series" -> {
+                val seriesCategories = _categories.value["Series"].orEmpty()
+                seriesCategories
+                    .flatMap { buildM3uSeriesIndex(it) }
+                    .distinctBy { it.id.ifBlank { it.name } }
+                    .filter(matcher)
+                    .filter(::isVisibleItem)
+                    .sortedBy { it.name.lowercase() }
+            }
+            else -> m3uChannelsByCategory.values.flatten()
+                .filter { it.itemType == "channel" && matcher(it) }
+                .filter(::isVisibleItem)
+                .sortedBy { it.name.lowercase() }
+        }
+    }
+
+    private fun buildXtreamPortalKey(serverUrl: String, username: String, password: String): String {
+        return "${serverUrl.trimEnd('/')}|$username|$password"
+    }
+
+    private fun filterVisibleItems(items: List<Channel>): List<Channel> = items.filter(::isVisibleItem)
+
+    private fun isVisibleItem(item: Channel): Boolean {
+        return !item.name.contains("=")
     }
 
     private data class ParsedEpisodeToken(

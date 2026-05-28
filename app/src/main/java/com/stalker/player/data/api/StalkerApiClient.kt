@@ -387,6 +387,54 @@ class StalkerApiClient {
         lastNonEmpty
     }
 
+    suspend fun search(
+        token: String,
+        url: String,
+        mac: String,
+        apiType: String,
+        query: String,
+        portalType: String
+    ): List<Channel> = withContext(Dispatchers.IO) {
+        val normalizedQuery = query.trim()
+        if (normalizedQuery.isBlank()) return@withContext emptyList()
+
+        val base = url.trimEnd('/')
+        val pType = if (portalType == "stalker") "stalker" else "mac"
+        val startPage = if (portalType == "stalker") 1 else 0
+        val deduped = linkedMapOf<String, Channel>()
+        var page = startPage
+        var totalItems = Int.MAX_VALUE
+
+        while (deduped.size < totalItems) {
+            val body = get(
+                buildReq(
+                    base,
+                    pType,
+                    mac,
+                    token,
+                    mapOf(
+                        "type" to apiType,
+                        "action" to "get_ordered_list",
+                        "search" to normalizedQuery,
+                        "p" to page.toString(),
+                        "JsHttpRequest" to "1-xml"
+                    )
+                )
+            )
+            val (items, total) = parseChannels(body, apiType, base, portalType)
+            if (items.isEmpty()) break
+            totalItems = total
+            items.forEach { item ->
+                val key = item.id.ifBlank { item.seriesId.ifBlank { item.movieId.ifBlank { item.name } } }
+                if (key.isNotBlank()) deduped.putIfAbsent(key, item)
+            }
+            if (items.size >= totalItems) break
+            page += 1
+        }
+
+        deduped.values.toList()
+    }
+
     private fun parseChannels(body: String, apiType: String, base: String = "", portalType: String = ""): Pair<List<Channel>, Int> {
         val root = safeParse(body) ?: return emptyList<Channel>() to 0
         val js = root.getAsJsonObject("js") ?: return emptyList<Channel>() to 0

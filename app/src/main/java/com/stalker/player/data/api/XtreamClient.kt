@@ -263,6 +263,16 @@ class XtreamClient {
         parseChannels(body, "channel")
     }
 
+    suspend fun getAllLiveStreams(
+        url: String,
+        username: String,
+        password: String
+    ): List<Channel> = withContext(Dispatchers.IO) {
+        val builtUrl = buildUrl(url, username, password, "action" to "get_live_streams")
+        val body = httpGetWithRetry(builtUrl)
+        parseChannels(body, "channel")
+    }
+
     suspend fun getVodStreams(
         url: String,
         username: String,
@@ -278,6 +288,16 @@ class XtreamClient {
         parseChannels(body, "vod")
     }
 
+    suspend fun getAllVodStreams(
+        url: String,
+        username: String,
+        password: String
+    ): List<Channel> = withContext(Dispatchers.IO) {
+        val builtUrl = buildUrl(url, username, password, "action" to "get_vod_streams")
+        val body = httpGetWithRetry(builtUrl)
+        parseChannels(body, "vod")
+    }
+
     suspend fun getSeries(
         url: String,
         username: String,
@@ -289,6 +309,16 @@ class XtreamClient {
             "action" to "get_series",
             "category_id" to categoryId
         )
+        val body = httpGetWithRetry(builtUrl)
+        parseChannels(body, "series")
+    }
+
+    suspend fun getAllSeries(
+        url: String,
+        username: String,
+        password: String
+    ): List<Channel> = withContext(Dispatchers.IO) {
+        val builtUrl = buildUrl(url, username, password, "action" to "get_series")
         val body = httpGetWithRetry(builtUrl)
         parseChannels(body, "series")
     }
