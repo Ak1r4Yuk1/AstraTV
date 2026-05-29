@@ -401,7 +401,7 @@ private fun TvSetupPanel(remoteUrl: String, remoteCode: String) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text(Strings["addListsFromBrowser"], color = White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            Text(Strings["addListsFromBrowser"], color = White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(12.dp))
             QrCodeImage(remoteUrl, Modifier.size(190.dp))
             Spacer(Modifier.height(14.dp))
@@ -436,7 +436,7 @@ private fun TvTextField(value: String, onValueChange: (String) -> Unit, label: S
 private fun QrCodeImage(text: String, modifier: Modifier = Modifier) {
     val bitmap = remember(text) { createQrBitmap(text.ifBlank { "AstraTV" }, 512) }
     Surface(modifier, color = Color.White, shape = RoundedCornerShape(24.dp)) {
-        Image(bitmap.asImageBitmap(), null, modifier = Modifier.fillMaxSize().padding(4.dp))
+        Image(bitmap.asImageBitmap(), null, modifier = Modifier.fillMaxSize().padding(2.dp))
     }
 }
 
