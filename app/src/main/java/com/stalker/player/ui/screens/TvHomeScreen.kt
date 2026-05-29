@@ -4,15 +4,20 @@ import android.app.Activity
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,17 +33,18 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import androidx.compose.ui.platform.LocalContext
 import android.graphics.Bitmap
-import androidx.compose.foundation.Image
 import androidx.activity.compose.BackHandler
 import com.stalker.player.R
 import com.stalker.player.data.model.Category
@@ -56,6 +62,15 @@ private data class TvLanguageOption(
     val nativeName: String
 )
 
+private data class TvLayoutMetrics(
+    val isCompact: Boolean,
+    val screenPadding: Dp,
+    val panelSpacing: Dp,
+    val sidebarWidth: Dp,
+    val liveGridMinWidth: Dp,
+    val posterGridMinWidth: Dp
+)
+
 private val tvLanguageOptions = listOf(
     TvLanguageOption("it", "\uD83C\uDDEE\uD83C\uDDF9", "Italiano"),
     TvLanguageOption("en", "\uD83C\uDDEC\uD83C\uDDE7", "English"),
@@ -64,6 +79,24 @@ private val tvLanguageOptions = listOf(
     TvLanguageOption("es", "\uD83C\uDDEA\uD83C\uDDF8", "Español"),
     TvLanguageOption("ru", "\uD83C\uDDF7\uD83C\uDDFA", "Русский")
 )
+
+@Composable
+private fun rememberTvLayoutMetrics(): TvLayoutMetrics {
+    val configuration = LocalConfiguration.current
+    val isCompact = configuration.screenWidthDp < 1180 || configuration.screenHeightDp < 720
+    return TvLayoutMetrics(
+        isCompact = isCompact,
+        screenPadding = if (isCompact) 18.dp else 28.dp,
+        panelSpacing = if (isCompact) 16.dp else 24.dp,
+        sidebarWidth = when {
+            configuration.screenWidthDp < 1180 -> 284.dp
+            configuration.screenWidthDp < 1440 -> 306.dp
+            else -> 330.dp
+        },
+        liveGridMinWidth = if (isCompact) 210.dp else 250.dp,
+        posterGridMinWidth = if (isCompact) 148.dp else 165.dp
+    )
+}
 
 @Composable
 fun TvHomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
@@ -85,6 +118,7 @@ fun TvHomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
     val currentView by viewModel.currentView.collectAsState()
     val navStack by viewModel.navStackFlow.collectAsState()
     val searchLoading by viewModel.searchLoading.collectAsState()
+    val layout = rememberTvLayoutMetrics()
     var selectedTab by remember { mutableIntStateOf(0) }
     var searchQ by remember { mutableStateOf("") }
     var lastBackAt by remember { mutableLongStateOf(0L) }
@@ -154,15 +188,16 @@ fun TvHomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
             }
     ) {
         if (!playerActive && movie != null) {
-            TvMovieDetailDialog(item = movie!!, onPlay = { viewModel.startPlayback(movie!!, onPlay) }, onClose = { viewModel.clearDetail() })
+            TvMovieDetailDialog(item = movie!!, compact = layout.isCompact, onPlay = { viewModel.startPlayback(movie!!, onPlay) }, onClose = { viewModel.clearDetail() })
         } else if (!playerActive && series != null) {
-            TvSeriesDetailDialog(viewModel = viewModel, item = series!!, onPlay = onPlay, onClose = { viewModel.clearDetail() })
-        } else Row(Modifier.fillMaxSize().padding(28.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            TvSeriesDetailDialog(viewModel = viewModel, item = series!!, compact = layout.isCompact, onPlay = onPlay, onClose = { viewModel.clearDetail() })
+        } else Row(Modifier.fillMaxSize().padding(layout.screenPadding), horizontalArrangement = Arrangement.spacedBy(layout.panelSpacing)) {
             TvSidebar(
                 connected = connected,
                 profiles = profiles,
                 remoteUrl = remoteUrl,
                 selectedTab = selectedTab,
+                layout = layout,
                 onSettings = { showSettings = true },
                 onTab = {
                     selectedTab = it
@@ -177,7 +212,7 @@ fun TvHomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
                 TvStatus(error = error, remoteMessage = remoteMessage, onClearError = { viewModel.clearError() }, onClearMessage = { viewModel.clearRemoteImportMessage() })
                 Spacer(Modifier.height(12.dp))
                 if (!connected) {
-                    TvSetupPanel(remoteUrl = remoteUrl, remoteCode = remoteCode)
+                    TvSetupPanel(remoteUrl = remoteUrl, remoteCode = remoteCode, layout = layout)
                 } else {
                     if (selectedTab < 3 && currentView != "seasons" && currentView != "episodes") {
                         OutlinedTextField(
@@ -194,14 +229,14 @@ fun TvHomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
                                     searchQ.isNotBlank() -> IconButton(onClick = { searchQ = "" }) { Icon(Icons.Default.Clear, null, tint = Gray) }
                                 }
                             },
-                            shape = RoundedCornerShape(18.dp)
+                            shape = RoundedCornerShape(if (layout.isCompact) 16.dp else 18.dp)
                         )
                         Spacer(Modifier.height(12.dp))
                     }
                     when (selectedTab) {
-                        0 -> TvLiveGrid(viewModel = viewModel, query = searchQ, autoFocusResults = searchQ.isBlank(), onPlay = onPlay)
-                        1 -> TvPosterGrid(viewModel = viewModel, query = searchQ, isSeries = false, autoFocusResults = searchQ.isBlank(), onPlay = onPlay)
-                        2 -> TvPosterGrid(viewModel = viewModel, query = searchQ, isSeries = true, autoFocusResults = searchQ.isBlank(), onPlay = onPlay)
+                        0 -> TvLiveGrid(viewModel = viewModel, query = searchQ, autoFocusResults = searchQ.isBlank(), layout = layout, onPlay = onPlay)
+                        1 -> TvPosterGrid(viewModel = viewModel, query = searchQ, isSeries = false, autoFocusResults = searchQ.isBlank(), layout = layout, onPlay = onPlay)
+                        2 -> TvPosterGrid(viewModel = viewModel, query = searchQ, isSeries = true, autoFocusResults = searchQ.isBlank(), layout = layout, onPlay = onPlay)
                         else -> InfoTab(viewModel)
                     }
                 }
@@ -211,7 +246,8 @@ fun TvHomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
         if (isLoading) {
             TvLoadingOverlay(
                 progress = progress,
-                message = if (connected) Strings["loadingInProgress"] else Strings["loginInProgress"]
+                message = if (connected) Strings["loadingInProgress"] else Strings["loginInProgress"],
+                compact = layout.isCompact
             )
         }
     }
@@ -263,6 +299,7 @@ private fun TvSidebar(
     profiles: List<Profile>,
     remoteUrl: String,
     selectedTab: Int,
+    layout: TvLayoutMetrics,
     onSettings: () -> Unit,
     onTab: (Int) -> Unit,
     onProfile: (Int) -> Unit,
@@ -274,13 +311,13 @@ private fun TvSidebar(
             firstProfileFocusRequester.requestFocus()
         }
     }
-    Column(Modifier.width(330.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(Modifier.width(layout.sidebarWidth).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(if (layout.isCompact) 12.dp else 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(painterResource(R.drawable.ic_brand_mark), null, tint = Color.Unspecified, modifier = Modifier.size(54.dp))
+            Icon(painterResource(R.drawable.ic_brand_mark), null, tint = Color.Unspecified, modifier = Modifier.size(if (layout.isCompact) 46.dp else 54.dp))
             Spacer(Modifier.width(12.dp))
             Column {
-                Text(Strings["tvApp"], color = White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                Text(Strings["tvSubtitle"], color = Cyan, fontSize = 13.sp)
+                Text(Strings["tvApp"], color = White, fontSize = if (layout.isCompact) 24.sp else 28.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(Strings["tvSubtitle"], color = Cyan, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
 
@@ -292,9 +329,9 @@ private fun TvSidebar(
                 Icons.Default.Info to Strings["info"]
             ).forEachIndexed { index, item ->
                 val selected = selectedTab == index
-                TvMenuButton(text = item.second, icon = item.first, selected = selected, onClick = { onTab(index) })
+                TvMenuButton(text = item.second, icon = item.first, selected = selected, compact = layout.isCompact, onClick = { onTab(index) })
             }
-            TvMenuButton(text = Strings["settings"], icon = Icons.Default.Settings, selected = false, onClick = onSettings)
+            TvMenuButton(text = Strings["settings"], icon = Icons.Default.Settings, selected = false, compact = layout.isCompact, onClick = onSettings)
             Spacer(Modifier.weight(1f))
             OutlinedButton(onClick = onDisconnect, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = Red), border = BorderStroke(1.dp, Red.copy(alpha = 0.35f))) {
                 Icon(Icons.Default.Close, null, modifier = Modifier.size(18.dp))
@@ -302,7 +339,7 @@ private fun TvSidebar(
                 Text(Strings["disconnect"])
             }
         } else {
-            Text(Strings["profiles"], color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(Strings["profiles"], color = White, fontSize = if (layout.isCompact) 17.sp else 18.sp, fontWeight = FontWeight.Bold)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                 if (profiles.isEmpty()) item { Text(Strings["noProfiles"], color = Gray, fontSize = 14.sp) }
                 items(profiles.size) { index ->
@@ -312,7 +349,7 @@ private fun TvSidebar(
                         Column(Modifier.padding(14.dp)) {
                             Text(profile.name, color = White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(Strings.portalLabel(profile.type), color = Cyan, fontSize = 12.sp)
-                            Text(profile.url, color = Gray, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(profile.url, color = Gray, fontSize = 11.sp, maxLines = if (layout.isCompact) 2 else 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -328,16 +365,16 @@ private fun TvSidebar(
 }
 
 @Composable
-private fun TvMenuButton(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean, onClick: () -> Unit) {
+private fun TvMenuButton(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean, compact: Boolean, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable(onClick = onClick),
         color = if (selected) Cyan else CardBg,
         shape = RoundedCornerShape(18.dp)
     ) {
-        Row(Modifier.padding(horizontal = 18.dp, vertical = 15.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = if (selected) Bg else Cyan, modifier = Modifier.size(24.dp))
+        Row(Modifier.padding(horizontal = if (compact) 16.dp else 18.dp, vertical = if (compact) 13.dp else 15.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = if (selected) Bg else Cyan, modifier = Modifier.size(if (compact) 22.dp else 24.dp))
             Spacer(Modifier.width(12.dp))
-            Text(text, color = if (selected) Bg else White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(text, color = if (selected) Bg else White, fontSize = if (compact) 16.sp else 18.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -358,7 +395,7 @@ private fun TvStatus(error: String?, remoteMessage: String, onClearError: () -> 
 }
 
 @Composable
-private fun TvLoadingOverlay(progress: Int, message: String) {
+private fun TvLoadingOverlay(progress: Int, message: String, compact: Boolean) {
     Box(
         Modifier
             .fillMaxSize()
@@ -366,18 +403,18 @@ private fun TvLoadingOverlay(progress: Int, message: String) {
         contentAlignment = Alignment.Center
     ) {
         Surface(
-            modifier = Modifier.widthIn(min = 360.dp, max = 520.dp),
+            modifier = Modifier.widthIn(min = if (compact) 280.dp else 360.dp, max = 520.dp),
             color = CardBg,
             shape = RoundedCornerShape(24.dp),
             border = BorderStroke(1.dp, Cyan.copy(alpha = 0.18f))
         ) {
             Column(
-                Modifier.padding(horizontal = 28.dp, vertical = 24.dp),
+                Modifier.padding(horizontal = if (compact) 22.dp else 28.dp, vertical = if (compact) 20.dp else 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 CircularProgressIndicator(color = Cyan, strokeWidth = 4.dp)
-                Text(message, color = White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(message, color = White, fontSize = if (compact) 19.sp else 22.sp, fontWeight = FontWeight.Bold)
                 Text(Strings["pleaseWaitLong"], color = Gray, fontSize = 14.sp)
                 if (progress > 0) {
                     LinearProgressIndicator(
@@ -394,27 +431,73 @@ private fun TvLoadingOverlay(progress: Int, message: String) {
 }
 
 @Composable
-private fun TvSetupPanel(remoteUrl: String, remoteCode: String) {
+private fun TvSetupPanel(remoteUrl: String, remoteCode: String, layout: TvLayoutMetrics) {
     Card(Modifier.fillMaxSize(), colors = CardDefaults.cardColors(containerColor = CardBg), shape = RoundedCornerShape(28.dp)) {
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = 42.dp, vertical = 28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text(Strings["addListsFromBrowser"], color = White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(12.dp))
-            QrCodeImage(remoteUrl, Modifier.size(190.dp))
-            Spacer(Modifier.height(14.dp))
-            Text(Strings["urlLabel"], color = Gray, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            Surface(color = Bg, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, Cyan.copy(alpha = 0.28f))) {
-                Text(remoteUrl.ifBlank { Strings["serverStarting"] }, color = Green, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 560.dp).padding(horizontal = 16.dp, vertical = 10.dp))
-            }
-            Spacer(Modifier.height(12.dp))
-            Text(Strings["codeLabel"], color = Gray, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            Surface(color = Cyan, shape = RoundedCornerShape(16.dp)) {
-                Text(remoteCode, color = Bg, fontSize = 28.sp, fontWeight = FontWeight.Black, letterSpacing = 4.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 7.dp))
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val compact = layout.isCompact || maxWidth < 760.dp || maxHeight < 560.dp
+            val contentPadding = if (compact) 20.dp else 28.dp
+            val qrSize = if (compact) 150.dp else 190.dp
+            val useWideLayout = maxWidth >= 920.dp
+            if (useWideLayout) {
+                Row(
+                    Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = contentPadding),
+                    horizontalArrangement = Arrangement.spacedBy(28.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    QrCodeImage(remoteUrl, Modifier.size(qrSize))
+                    Column(
+                        Modifier.widthIn(max = 560.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(Strings["addListsFromBrowser"], color = White, fontSize = if (compact) 19.sp else 22.sp, fontWeight = FontWeight.Bold)
+                        Text(Strings["urlLabel"], color = Gray, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Surface(color = Bg, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, Cyan.copy(alpha = 0.28f))) {
+                            Text(
+                                remoteUrl.ifBlank { Strings["serverStarting"] },
+                                color = Green,
+                                fontSize = if (compact) 14.sp else 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)
+                            )
+                        }
+                        Text(Strings["codeLabel"], color = Gray, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Surface(color = Cyan, shape = RoundedCornerShape(16.dp)) {
+                            Text(remoteCode, color = Bg, fontSize = if (compact) 24.sp else 28.sp, fontWeight = FontWeight.Black, letterSpacing = 4.sp, modifier = Modifier.padding(horizontal = if (compact) 18.dp else 22.dp, vertical = 7.dp))
+                        }
+                    }
+                }
+            } else {
+                Column(
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = if (compact) 22.dp else 42.dp, vertical = contentPadding),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(Strings["addListsFromBrowser"], color = White, fontSize = if (compact) 19.sp else 22.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(12.dp))
+                    QrCodeImage(remoteUrl, Modifier.size(qrSize))
+                    Spacer(Modifier.height(14.dp))
+                    Text(Strings["urlLabel"], color = Gray, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Surface(color = Bg, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, Cyan.copy(alpha = 0.28f))) {
+                        Text(
+                            remoteUrl.ifBlank { Strings["serverStarting"] },
+                            color = Green,
+                            fontSize = if (compact) 14.sp else 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = if (compact) 2 else 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 560.dp).padding(horizontal = 16.dp, vertical = 10.dp)
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text(Strings["codeLabel"], color = Gray, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Surface(color = Cyan, shape = RoundedCornerShape(16.dp)) {
+                        Text(remoteCode, color = Bg, fontSize = if (compact) 24.sp else 28.sp, fontWeight = FontWeight.Black, letterSpacing = 4.sp, modifier = Modifier.padding(horizontal = if (compact) 18.dp else 22.dp, vertical = 7.dp))
+                    }
+                }
             }
         }
     }
@@ -452,7 +535,7 @@ private fun createQrBitmap(text: String, size: Int): Bitmap {
 }
 
 @Composable
-private fun TvLiveGrid(viewModel: MainViewModel, query: String, autoFocusResults: Boolean, onPlay: () -> Unit) {
+private fun TvLiveGrid(viewModel: MainViewModel, query: String, autoFocusResults: Boolean, layout: TvLayoutMetrics, onPlay: () -> Unit) {
     val cv by viewModel.currentView.collectAsState()
     val channels by viewModel.channels.collectAsState()
     val categories by viewModel.categories.collectAsState()
@@ -467,7 +550,7 @@ private fun TvLiveGrid(viewModel: MainViewModel, query: String, autoFocusResults
         (categories["Live"] ?: emptyList()).map { Channel(id = it.categoryId, name = it.name, itemType = "category", categoryType = it.categoryType) }
     }
     if (query.isBlank() && cv != "channels") {
-        TvCategoryList(items = items, requestInitialFocus = true) { item ->
+        TvCategoryList(items = items, requestInitialFocus = true, compact = layout.isCompact) { item ->
             scope.launch { viewModel.onCategoryClick(Category(item.name, item.categoryType, item.id)) }
         }
         return
@@ -483,14 +566,14 @@ private fun TvLiveGrid(viewModel: MainViewModel, query: String, autoFocusResults
         if (!autoFocusResults || query.isNotBlank()) return@LaunchedEffect
         if (items.isNotEmpty()) firstItemFocusRequester.requestFocus()
     }
-    LazyVerticalGrid(columns = GridCells.Adaptive(250.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyVerticalGrid(columns = GridCells.Adaptive(layout.liveGridMinWidth), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         items(items) { item ->
             val modifier = if (item == items.firstOrNull()) Modifier.focusRequester(firstItemFocusRequester) else Modifier
-            Card(modifier.height(78.dp).clickable { scope.launch { if (item.itemType == "category") viewModel.onCategoryClick(Category(item.name, item.categoryType, item.id)) else viewModel.startPlayback(item, onPlay) } }, colors = CardDefaults.cardColors(containerColor = CardBg), shape = RoundedCornerShape(18.dp)) {
-                Row(Modifier.fillMaxSize().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Card(modifier.height(if (layout.isCompact) 72.dp else 78.dp).clickable { scope.launch { if (item.itemType == "category") viewModel.onCategoryClick(Category(item.name, item.categoryType, item.id)) else viewModel.startPlayback(item, onPlay) } }, colors = CardDefaults.cardColors(containerColor = CardBg), shape = RoundedCornerShape(18.dp)) {
+                Row(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = if (layout.isCompact) 10.dp else 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     ChanIcon(item.screenshotUri, item.itemType)
                     Spacer(Modifier.width(12.dp))
-                    Text(item.name, color = White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(item.name, color = White, fontSize = if (layout.isCompact) 14.sp else 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -498,7 +581,7 @@ private fun TvLiveGrid(viewModel: MainViewModel, query: String, autoFocusResults
 }
 
 @Composable
-private fun TvPosterGrid(viewModel: MainViewModel, query: String, isSeries: Boolean, autoFocusResults: Boolean, onPlay: () -> Unit) {
+private fun TvPosterGrid(viewModel: MainViewModel, query: String, isSeries: Boolean, autoFocusResults: Boolean, layout: TvLayoutMetrics, onPlay: () -> Unit) {
     val cv by viewModel.currentView.collectAsState()
     val channels by viewModel.channels.collectAsState()
     val categories by viewModel.categories.collectAsState()
@@ -514,7 +597,7 @@ private fun TvPosterGrid(viewModel: MainViewModel, query: String, isSeries: Bool
         (categories[tab] ?: emptyList()).map { Channel(id = it.categoryId, name = it.name, itemType = "category", categoryType = it.categoryType) }
     }
     if (query.isBlank() && cv != "channels") {
-        TvCategoryList(items = items, requestInitialFocus = true) { item ->
+        TvCategoryList(items = items, requestInitialFocus = true, compact = layout.isCompact) { item ->
             scope.launch { viewModel.onCategoryClick(Category(item.name, if (isSeries) "Series" else "VOD", item.id)) }
         }
         return
@@ -530,7 +613,7 @@ private fun TvPosterGrid(viewModel: MainViewModel, query: String, isSeries: Bool
         if (!autoFocusResults || query.isNotBlank()) return@LaunchedEffect
         if (items.isNotEmpty()) firstItemFocusRequester.requestFocus()
     }
-    LazyVerticalGrid(columns = GridCells.Adaptive(165.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(4.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    LazyVerticalGrid(columns = GridCells.Adaptive(layout.posterGridMinWidth), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(4.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         items(items) { item ->
             val modifier = if (item == items.firstOrNull()) Modifier.focusRequester(firstItemFocusRequester) else Modifier
             Card(modifier.clickable { scope.launch { if (item.itemType == "category") viewModel.onCategoryClick(Category(item.name, if (isSeries) "Series" else "VOD", item.id)) else if (isSeries) viewModel.onSeriesClick(item) else viewModel.onVodClick(item) } }, colors = CardDefaults.cardColors(containerColor = CardBg), shape = RoundedCornerShape(18.dp)) {
@@ -539,7 +622,7 @@ private fun TvPosterGrid(viewModel: MainViewModel, query: String, isSeries: Bool
                         if (item.screenshotUri.isNotBlank()) AsyncImage(ImageRequest.Builder(LocalContext.current).data(item.screenshotUri).crossfade(true).build(), null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                         else Icon(if (isSeries) Icons.Default.Tv else Icons.Default.Movie, null, tint = Gray, modifier = Modifier.size(46.dp))
                     }
-                    Text(item.name, color = White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(10.dp))
+                    Text(item.name, color = White, fontSize = if (layout.isCompact) 13.sp else 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(if (layout.isCompact) 9.dp else 10.dp))
                 }
             }
         }
@@ -547,7 +630,7 @@ private fun TvPosterGrid(viewModel: MainViewModel, query: String, isSeries: Bool
 }
 
 @Composable
-private fun TvCategoryList(items: List<Channel>, requestInitialFocus: Boolean = false, onClick: (Channel) -> Unit) {
+private fun TvCategoryList(items: List<Channel>, requestInitialFocus: Boolean = false, compact: Boolean = false, onClick: (Channel) -> Unit) {
     val firstItemFocusRequester = remember { FocusRequester() }
     LaunchedEffect(items.size, requestInitialFocus) {
         if (requestInitialFocus && items.isNotEmpty()) firstItemFocusRequester.requestFocus()
@@ -558,7 +641,7 @@ private fun TvCategoryList(items: List<Channel>, requestInitialFocus: Boolean = 
             Surface(
                 modifier
                     .fillMaxWidth()
-                    .height(62.dp)
+                    .height(if (compact) 56.dp else 62.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .clickable { onClick(item) },
                 color = CardBg,
@@ -568,7 +651,7 @@ private fun TvCategoryList(items: List<Channel>, requestInitialFocus: Boolean = 
                 Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Folder, null, tint = Cyan, modifier = Modifier.size(24.dp))
                     Spacer(Modifier.width(14.dp))
-                    Text(item.name, color = White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(item.name, color = White, fontSize = if (compact) 15.sp else 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Icon(Icons.Default.ChevronRight, null, tint = Gray, modifier = Modifier.size(22.dp))
                 }
             }
@@ -577,7 +660,7 @@ private fun TvCategoryList(items: List<Channel>, requestInitialFocus: Boolean = 
 }
 
 @Composable
-private fun TvMovieDetailDialog(item: Channel, onPlay: () -> Unit, onClose: () -> Unit) {
+private fun TvMovieDetailDialog(item: Channel, compact: Boolean, onPlay: () -> Unit, onClose: () -> Unit) {
     BackHandler(enabled = true) { onClose() }
     val backFocusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { backFocusRequester.requestFocus() }
@@ -586,11 +669,11 @@ private fun TvMovieDetailDialog(item: Channel, onPlay: () -> Unit, onClose: () -
         Modifier
             .fillMaxSize()
             .background(Bg)
-            .padding(horizontal = 18.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(18.dp)
+            .padding(horizontal = if (compact) 12.dp else 18.dp, vertical = if (compact) 12.dp else 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 14.dp else 18.dp)
     ) {
-        Column(Modifier.width(250.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            PosterBox(item, Modifier.width(170.dp).aspectRatio(0.68f))
+        Column(Modifier.width(if (compact) 212.dp else 250.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            PosterBox(item, Modifier.width(if (compact) 142.dp else 170.dp).aspectRatio(0.68f))
             Surface(Modifier.fillMaxWidth(), color = CardBg, shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, Cyan.copy(alpha = 0.08f))) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TvMetaChips(item, compact = true)
@@ -602,7 +685,7 @@ private fun TvMovieDetailDialog(item: Channel, onPlay: () -> Unit, onClose: () -
                 }
             }
         }
-        Column(Modifier.weight(1f).fillMaxHeight()) {
+        Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onClose, modifier = Modifier.focusRequester(backFocusRequester)) {
                     Icon(Icons.Default.ArrowBack, null, tint = Cyan)
@@ -610,7 +693,7 @@ private fun TvMovieDetailDialog(item: Channel, onPlay: () -> Unit, onClose: () -
                     Text(Strings["back"], color = Cyan, fontSize = 15.sp)
                 }
                 Spacer(Modifier.width(8.dp))
-                Text(item.name, color = White, fontSize = 24.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(item.name, color = White, fontSize = if (compact) 21.sp else 24.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             }
             Spacer(Modifier.height(8.dp))
             Surface(Modifier.fillMaxWidth().heightIn(min = 112.dp, max = 180.dp), color = CardBg, shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, Cyan.copy(alpha = 0.08f))) {
@@ -628,7 +711,7 @@ private fun TvMovieDetailDialog(item: Channel, onPlay: () -> Unit, onClose: () -
                 }
             }
             Spacer(Modifier.height(10.dp))
-            Button(onClick = onPlay, modifier = Modifier.width(188.dp).height(48.dp), colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Bg)) {
+            Button(onClick = onPlay, modifier = Modifier.width(if (compact) 164.dp else 188.dp).height(48.dp), colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Bg)) {
                 Icon(Icons.Default.PlayArrow, null)
                 Spacer(Modifier.width(8.dp))
                 Text(Strings["play"], fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -638,7 +721,7 @@ private fun TvMovieDetailDialog(item: Channel, onPlay: () -> Unit, onClose: () -
 }
 
 @Composable
-private fun TvSeriesDetailDialog(viewModel: MainViewModel, item: Channel, onPlay: () -> Unit, onClose: () -> Unit) {
+private fun TvSeriesDetailDialog(viewModel: MainViewModel, item: Channel, compact: Boolean, onPlay: () -> Unit, onClose: () -> Unit) {
     val currentView by viewModel.currentView.collectAsState()
     val seasons by viewModel.seasons.collectAsState()
     val episodes by viewModel.episodes.collectAsState()
@@ -655,11 +738,11 @@ private fun TvSeriesDetailDialog(viewModel: MainViewModel, item: Channel, onPlay
         Modifier
             .fillMaxSize()
             .background(Bg)
-            .padding(horizontal = 18.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(18.dp)
+            .padding(horizontal = if (compact) 12.dp else 18.dp, vertical = if (compact) 12.dp else 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 14.dp else 18.dp)
     ) {
-        Column(Modifier.width(250.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            PosterBox(item, Modifier.width(160.dp).aspectRatio(0.68f))
+        Column(Modifier.width(if (compact) 212.dp else 250.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            PosterBox(item, Modifier.width(if (compact) 136.dp else 160.dp).aspectRatio(0.68f))
             Surface(Modifier.fillMaxWidth(), color = CardBg, shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, Cyan.copy(alpha = 0.08f))) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TvMetaChips(item, compact = true)
@@ -679,7 +762,7 @@ private fun TvSeriesDetailDialog(viewModel: MainViewModel, item: Channel, onPlay
                     Text(Strings["back"], color = Cyan, fontSize = 15.sp)
                 }
                 Spacer(Modifier.width(8.dp))
-                Text(item.name, color = White, fontSize = 23.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(item.name, color = White, fontSize = if (compact) 20.sp else 23.sp, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 if (currentView == "episodes") {
                     TextButton(onClick = { viewModel.goBack() }) { Text(Strings["seasons"], color = Cyan) }
                 }
@@ -728,6 +811,7 @@ private fun TvEpisodeList(items: List<Channel>, emptyText: String, requestInitia
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TvMetaChips(item: Channel, compact: Boolean = false) {
     val chips = buildList {
@@ -738,7 +822,7 @@ private fun TvMetaChips(item: Channel, compact: Boolean = false) {
     }
     Column(verticalArrangement = Arrangement.spacedBy(if (compact) 5.dp else 7.dp)) {
         if (chips.isNotEmpty()) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 chips.take(4).forEach { chip ->
                     Surface(color = Cyan.copy(alpha = 0.13f), shape = RoundedCornerShape(999.dp), border = BorderStroke(1.dp, Cyan.copy(alpha = 0.25f))) {
                         Text(chip, color = Cyan, fontSize = if (compact) 10.sp else 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = if (compact) 8.dp else 10.dp, vertical = if (compact) 4.dp else 5.dp))
