@@ -480,7 +480,9 @@ class StalkerRepository(
                 } ?: item.streamUrl.ifBlank { item.cmd }
                 else -> client.getStreamUrl(token!!, portalUrl, portalMac, item, portalType)
             }
-            Result.success(url)
+            // Risolve eventuali redirect (es. RAI relinker -> .m3u8) cosi' ExoPlayer
+            // riconosce il formato reale dello stream.
+            Result.success(m3uClient.resolveFinalUrl(url))
         } catch (e: Exception) { 
             _error.value = e.message ?: e.toString()
             Result.failure(e) 

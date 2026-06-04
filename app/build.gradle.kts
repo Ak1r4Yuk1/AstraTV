@@ -84,6 +84,12 @@ dependencies {
     // Media3 (ExoPlayer)
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
+    // Moduli per gli altri formati di streaming usati da alcuni canali IPTV: senza
+    // questi, aprire un flusso DASH/SmoothStreaming/RTSP fa crashare ExoPlayer con
+    // ClassNotFoundException (DefaultMediaSourceFactory carica le factory via reflection).
+    implementation("androidx.media3:media3-exoplayer-dash:1.5.1")
+    implementation("androidx.media3:media3-exoplayer-smoothstreaming:1.5.1")
+    implementation("androidx.media3:media3-exoplayer-rtsp:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
 
     // Networking

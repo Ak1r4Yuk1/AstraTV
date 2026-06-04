@@ -15,18 +15,26 @@ import java.util.concurrent.TimeUnit
 class M3uClient(private val context: Context) {
     companion object {
         private const val MAX_CHANNELS_SOFT_LIMIT = 400_000
+
+        // UA usato per la riproduzione/risoluzione degli stream. Alcuni relinker
+        // (es. RAI) rispondono 403 allo UA "IPTVSmartersPro" ma accettano uno UA
+        // da browser/player. Usato sia qui che in ExoPlayer per coerenza del token.
+        const val STREAM_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:151.0) Gecko/20100101 Firefox/151.0"
     }
 
-    // USER-AGENT "IPTVSmartersPro" PER ENTRARE NELLE WHITELIST DEI SERVER
+    // USER-AGENT "IPTVSmartersPro" PER ENTRARE NELLE WHITELIST DEI SERVER (solo se la
+    // richiesta non specifica gia' un proprio User-Agent, vedi resolveFinalUrl).
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .addInterceptor { chain ->
-            val request = chain.request().newBuilder()
-                .header("User-Agent", "IPTVSmartersPro") 
-                .header("Accept", "*/*")
-                .build()
-            chain.proceed(request)
+            val original = chain.request()
+            val builder = original.newBuilder().header("Accept", "*/*")
+            if (original.header("User-Agent") == null) {
+                builder.header("User-Agent", "IPTVSmartersPro")
+            }
+            chain.proceed(builder.build())
         }
         .build()
 
@@ -56,6 +64,34 @@ class M3uClient(private val context: Context) {
             else -> {
                 context.openFileInput(source).bufferedReader().use { reader -> parseStreaming(reader) }
             }
+        }
+    }
+
+    /**
+     * Alcuni link (es. RAI relinker) non sono lo stream vero ma un redirect 302 verso
+     * l'URL reale, che spesso e' un .m3u8 (HLS) con token. ExoPlayer deduce il tipo di
+     * contenuto dall'URL ORIGINALE (qui un .htm con content-type text/html) e quindi
+     * non riconosce l'HLS. Risolviamo noi il redirect e restituiamo l'URL finale, cosi'
+     * il player lo tratta correttamente. In caso di errore si torna all'URL originale.
+     */
+    suspend fun resolveFinalUrl(url: String): String {
+        if (!url.startsWith("http://") && !url.startsWith("https://")) return url
+        val path = Uri.parse(url).path?.lowercase().orEmpty()
+        val looksLikeMedia = listOf(".m3u8", ".m3u", ".ts", ".mp4", ".mkv", ".mpd", ".avi", ".mov", ".webm")
+            .any { path.endsWith(it) }
+        // Se l'URL ha gia' un'estensione media nota non serve risolvere nulla.
+        if (looksLikeMedia) return url
+        return try {
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", STREAM_USER_AGENT)
+                .get()
+                .build()
+            http.newCall(request).execute().use { response ->
+                response.request.url.toString()
+            }
+        } catch (_: Exception) {
+            url
         }
     }
 

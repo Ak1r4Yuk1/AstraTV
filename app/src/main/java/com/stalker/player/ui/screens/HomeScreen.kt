@@ -17,7 +17,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -795,6 +797,14 @@ fun ChannelListView(viewModel: MainViewModel, tab: String, query: String, onPlay
     val searchResults by viewModel.searchResults.collectAsState()
     val searchLoading by viewModel.searchLoading.collectAsState()
     val scope = rememberCoroutineScope()
+    // Stati di scroll distinti per la lista categorie e per la lista canali, mantenuti
+    // tra le navigazioni avanti/indietro.
+    val channelsGridState = rememberLazyGridState()
+    val categoriesGridState = rememberLazyGridState()
+    val channelsListState = rememberLazyListState()
+    val categoriesListState = rememberLazyListState()
+    val activeGridState = if (cv == "channels") channelsGridState else categoriesGridState
+    val activeListState = if (cv == "channels") channelsListState else categoriesListState
 
     Column(Modifier.fillMaxSize()) {
         if (ns.isNotEmpty()) {
@@ -824,6 +834,7 @@ fun ChannelListView(viewModel: MainViewModel, tab: String, query: String, onPlay
         }
         if (useTvGrid) {
             LazyVerticalGrid(
+                state = activeGridState,
                 columns = GridCells.Adaptive(minSize = if (cv == "channels") 300.dp else 260.dp),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 22.dp, vertical = 14.dp),
@@ -840,7 +851,7 @@ fun ChannelListView(viewModel: MainViewModel, tab: String, query: String, onPlay
                 }
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
+            LazyColumn(state = activeListState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
                 items(filtered) { item ->
                     ChannelRowCard(
                         item = item,
@@ -894,6 +905,11 @@ fun GridView(viewModel: MainViewModel, tab: String, query: String, onPlay: () ->
     val searchLoading by viewModel.searchLoading.collectAsState()
     val scope = rememberCoroutineScope()
     val minGridCardWidth = if (configuration.screenWidthDp >= 840) 200.dp else if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) 168.dp else 148.dp
+    // Stati di scroll mantenuti a livello di GridView cosi' la posizione sopravvive
+    // quando si apre il dettaglio (film/serie): aprendo una serie la view passa a
+    // "seasons" e il ramo poster esce dalla composizione, ma lo stato resta qui.
+    val posterGridState = rememberLazyGridState()
+    val categoryListState = rememberLazyListState()
 
     Column(Modifier.fillMaxSize()) {
         if (ns.isNotEmpty()) {
@@ -915,7 +931,7 @@ fun GridView(viewModel: MainViewModel, tab: String, query: String, onPlay: () ->
         }
         val showPosterResults = query.isNotBlank() || cv == "channels"
         if (showPosterResults) {
-            LazyVerticalGrid(columns = GridCells.Adaptive(minSize = minGridCardWidth), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyVerticalGrid(state = posterGridState, columns = GridCells.Adaptive(minSize = minGridCardWidth), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(filtered) { item ->
                     Card(Modifier.fillMaxWidth().clickable { scope.launch { if (isSeries) viewModel.onSeriesClick(item) else viewModel.onVodClick(item) } }, colors = CardDefaults.cardColors(containerColor = CardBg), shape = RoundedCornerShape(20.dp), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
                         Column {
@@ -933,7 +949,7 @@ fun GridView(viewModel: MainViewModel, tab: String, query: String, onPlay: () ->
                 }
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
+            LazyColumn(state = categoryListState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
                 items(filtered) { item ->
                     Card(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp).clickable { scope.launch { viewModel.onCategoryClick(Category(item.name, if (isSeries) "Series" else "VOD", item.id)) } }, colors = CardDefaults.cardColors(containerColor = CardBg), shape = RoundedCornerShape(10.dp)) {
                         Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {

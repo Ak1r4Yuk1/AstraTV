@@ -6,6 +6,7 @@ import android.view.View
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -16,7 +17,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -29,10 +37,13 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
 import com.stalker.player.R
+import com.stalker.player.data.api.M3uClient
 import com.stalker.player.data.model.Strings
 import com.stalker.player.ui.theme.AccentCyan
 import com.stalker.player.ui.theme.DarkBg
@@ -53,14 +64,27 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
     var isFullscreen by remember { mutableStateOf(false) }
     var isExiting by remember { mutableStateOf(false) }
     var isBuffering by remember { mutableStateOf(true) }
+    var playbackError by remember { mutableStateOf<String?>(null) }
 
     val appContext = context.applicationContext
     val trackSelector = remember { DefaultTrackSelector(appContext) }
     val player = remember {
+        // Alcuni server (es. RAI relinker) rispondono con un redirect 302 verso il
+        // flusso reale, spesso cambiando protocollo (http -> https) e richiedendo uno
+        // User-Agent specifico. ExoPlayer di default NON segue i redirect cross-protocol,
+        // quindi va abilitato esplicitamente perche' questi link funzionino.
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent(M3uClient.STREAM_USER_AGENT)
+            .setAllowCrossProtocolRedirects(true)
+            .setKeepPostFor302Redirects(true)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(20_000)
         ExoPlayer.Builder(appContext)
             .setTrackSelector(trackSelector)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(appContext).setDataSourceFactory(httpDataSourceFactory))
             .build()
     }
+    val focusRequester = remember { FocusRequester() }
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -70,6 +94,13 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 isBuffering = playbackState == Player.STATE_IDLE || playbackState == Player.STATE_BUFFERING
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                // Errori di rete/formato (es. 403, stream non supportato): mostriamo un
+                // messaggio invece di restare in buffering all'infinito.
+                isBuffering = false
+                playbackError = Strings["streamError"]
             }
         }
         player.addListener(listener)
@@ -109,6 +140,7 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
     }
 
     LaunchedEffect(streamUrl) {
+        playbackError = null
         if (streamUrl.isBlank()) {
             isBuffering = true
             player.stop()
@@ -116,9 +148,16 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
             return@LaunchedEffect
         }
         isBuffering = true
-        player.setMediaItem(MediaItem.fromUri(streamUrl))
-        player.prepare()
-        player.playWhenReady = true
+        // setMediaItem puo' lanciare in modo sincrono se manca il modulo per il
+        // formato richiesto (DASH/SmoothStreaming/RTSP): lo gestiamo senza crashare.
+        try {
+            player.setMediaItem(MediaItem.fromUri(streamUrl))
+            player.prepare()
+            player.playWhenReady = true
+        } catch (e: Exception) {
+            isBuffering = false
+            playbackError = Strings["streamError"]
+        }
     }
 
     LaunchedEffect(player) {
@@ -130,6 +169,21 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
     }
 
     LaunchedEffect(isFullscreen) { applyFullscreen() }
+
+    // Sul telecomando della TV non esiste il tocco: il player va guidato col D-pad.
+    // Richiediamo il focus cosi' la root Box riceve gli eventi tasto.
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    fun togglePlayPause() {
+        if (player.isPlaying) player.pause() else player.play()
+    }
+
+    fun seekBy(deltaMs: Long) {
+        val max = if (duration > 0) duration else Long.MAX_VALUE
+        val newPos = (player.currentPosition + deltaMs).coerceIn(0L, max)
+        player.seekTo(newPos)
+        currentPosition = newPos
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -146,6 +200,29 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .focusRequester(focusRequester)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (event.key) {
+                    Key.DirectionCenter, Key.Enter, Key.NumPadEnter,
+                    Key.Spacebar, Key.MediaPlayPause -> {
+                        togglePlayPause(); showControls = true; true
+                    }
+                    Key.MediaPlay -> { player.play(); showControls = true; true }
+                    Key.MediaPause -> { player.pause(); showControls = true; true }
+                    Key.DirectionLeft, Key.MediaRewind -> {
+                        seekBy(-10_000); showControls = true; true
+                    }
+                    Key.DirectionRight, Key.MediaFastForward -> {
+                        seekBy(10_000); showControls = true; true
+                    }
+                    Key.DirectionUp, Key.DirectionDown -> {
+                        showControls = true; true
+                    }
+                    else -> false
+                }
+            }
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = {
@@ -164,7 +241,20 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
             modifier = Modifier.fillMaxSize()
         )
 
-        if (isBuffering) {
+        if (playbackError != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.55f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Filled.ErrorOutline, contentDescription = null, tint = Color.White, modifier = Modifier.size(40.dp))
+                    Spacer(Modifier.height(10.dp))
+                    Text(playbackError ?: "", color = Color.White, fontSize = 14.sp)
+                }
+            }
+        } else if (isBuffering) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
