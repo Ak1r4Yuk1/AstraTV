@@ -3,6 +3,7 @@ package com.stalker.player.data.api
 import com.google.gson.JsonParser
 import com.stalker.player.data.model.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -51,7 +52,7 @@ class XtreamClient {
                     val wait = minOf(1000L * (1L shl (attempt - 1)), 16000L)
                     android.util.Log.w("XtreamClient", "Attempt $attempt/$maxRetries: HTTP ${response.code} for $url, retrying in ${wait}ms")
                     response.close()
-                    Thread.sleep(wait)
+                    delay(wait)
                     continue
                 }
                 if (body.isNullOrBlank()) {
@@ -69,7 +70,7 @@ class XtreamClient {
                 lastException = e
                 if (attempt < maxRetries) {
                     val wait = minOf(1000L * (1L shl (attempt - 1)), 16000L)
-                    Thread.sleep(wait)
+                    delay(wait)
                 }
             }
         }

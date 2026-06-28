@@ -4,6 +4,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- App utilizzabile sia su telefono/tablet sia su Android TV: il touchscreen e
+         il telecomando Leanback non devono essere requisiti obbligatori, altrimenti
+         lo store esclude l'app da una delle due categorie di dispositivi. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+
     <application
         android:name=".StalkerApp"
         android:allowBackup="true"

@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -284,6 +285,9 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
             val playButtonSize = if (compactHeight) 60.dp else 72.dp
             val playIconSize = if (compactHeight) 34.dp else 40.dp
             val controlsGap = if (compactHeight) 12.dp else 24.dp
+            // I canali live non hanno una durata nota (duration <= 0): per questi non ha
+            // senso mostrare slider e salti di 10s, quindi si mostra solo play/pausa.
+            val isLive = duration <= 0L
 
             Box(modifier = Modifier.fillMaxSize()) {
                 Box(
@@ -338,22 +342,24 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(
-                        onClick = {
-                            val newPos = (currentPosition - 10000).coerceAtLeast(0)
-                            player.seekTo(newPos)
-                            currentPosition = newPos
-                        },
-                        modifier = Modifier.size(seekButtonSize)
-                    ) {
-                        Icon(
-                            Icons.Filled.Replay10,
-                            contentDescription = Strings["rewind10"],
-                            tint = Color.White,
-                            modifier = Modifier.size(seekIconSize)
-                        )
+                    if (!isLive) {
+                        IconButton(
+                            onClick = {
+                                val newPos = (currentPosition - 10000).coerceAtLeast(0)
+                                player.seekTo(newPos)
+                                currentPosition = newPos
+                            },
+                            modifier = Modifier.size(seekButtonSize)
+                        ) {
+                            Icon(
+                                Icons.Filled.Replay10,
+                                contentDescription = Strings["rewind10"],
+                                tint = Color.White,
+                                modifier = Modifier.size(seekIconSize)
+                            )
+                        }
+                        Spacer(Modifier.width(controlsGap))
                     }
-                    Spacer(Modifier.width(controlsGap))
                     Surface(
                         modifier = Modifier.size(playButtonSize),
                         shape = CircleShape,
@@ -373,21 +379,23 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
                             )
                         }
                     }
-                    Spacer(Modifier.width(controlsGap))
-                    IconButton(
-                        onClick = {
-                            val newPos = (currentPosition + 10000).coerceAtMost(duration)
-                            player.seekTo(newPos)
-                            currentPosition = newPos
-                        },
-                        modifier = Modifier.size(seekButtonSize)
-                    ) {
-                        Icon(
-                            Icons.Filled.Forward10,
-                            contentDescription = Strings["forward10"],
-                            tint = Color.White,
-                            modifier = Modifier.size(seekIconSize)
-                        )
+                    if (!isLive) {
+                        Spacer(Modifier.width(controlsGap))
+                        IconButton(
+                            onClick = {
+                                val newPos = (currentPosition + 10000).coerceAtMost(duration)
+                                player.seekTo(newPos)
+                                currentPosition = newPos
+                            },
+                            modifier = Modifier.size(seekButtonSize)
+                        ) {
+                            Icon(
+                                Icons.Filled.Forward10,
+                                contentDescription = Strings["forward10"],
+                                tint = Color.White,
+                                modifier = Modifier.size(seekIconSize)
+                            )
+                        }
                     }
                 }
 
@@ -403,30 +411,50 @@ fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
                         .navigationBarsPadding()
                         .padding(horizontal = 16.dp, vertical = if (compactHeight) 6.dp else 8.dp)
                 ) {
-                    Slider(
-                        value = if (duration > 0) currentPosition.toFloat() / duration.toFloat() else 0f,
-                        onValueChange = { fraction ->
-                            val newPos = (fraction * duration).toLong()
-                            player.seekTo(newPos)
-                            currentPosition = newPos
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = SliderDefaults.colors(
-                            thumbColor = AccentCyan,
-                            activeTrackColor = AccentCyan,
-                            inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                    if (!isLive) {
+                        Slider(
+                            value = if (duration > 0) currentPosition.toFloat() / duration.toFloat() else 0f,
+                            onValueChange = { fraction ->
+                                val newPos = (fraction * duration).toLong()
+                                player.seekTo(newPos)
+                                currentPosition = newPos
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = SliderDefaults.colors(
+                                thumbColor = AccentCyan,
+                                activeTrackColor = AccentCyan,
+                                inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                            )
                         )
-                    )
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            "${formatTime(currentPosition)} / ${formatTime(duration)}",
-                            color = Color.White.copy(alpha = 0.8f),
-                            fontSize = if (compactHeight) 11.sp else 12.sp
-                        )
+                        if (isLive) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFE53935))
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    Strings["live"].uppercase(),
+                                    color = Color.White.copy(alpha = 0.9f),
+                                    fontSize = if (compactHeight) 11.sp else 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            Text(
+                                "${formatTime(currentPosition)} / ${formatTime(duration)}",
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = if (compactHeight) 11.sp else 12.sp
+                            )
+                        }
                         Row {
                             IconButton(onClick = { isFullscreen = !isFullscreen }, modifier = Modifier.size(36.dp)) {
                                 Icon(

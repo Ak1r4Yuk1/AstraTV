@@ -5,6 +5,7 @@ import com.stalker.player.data.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
@@ -120,7 +121,7 @@ class StalkerApiClient {
                 if (r.code in listOf(429, 500, 502, 503, 504)) {
                     val wait = minOf(BACKOFF_MS * (1L shl (attempt - 1)), 16000L)
                     android.util.Log.w("StalkerClient", "Attempt $attempt/$retries: HTTP ${r.code} for ${req.url}, retrying in ${wait}ms")
-                    Thread.sleep(wait)
+                    delay(wait)
                     continue
                 }
                 if (body.isBlank()) throw IOException("Empty response from ${req.url} (${r.code})")
@@ -131,7 +132,7 @@ class StalkerApiClient {
                 if (attempt < retries) {
                     val wait = minOf(BACKOFF_MS * (1L shl (attempt - 1)), 16000L)
                     android.util.Log.w("StalkerClient", "Attempt $attempt/$retries: ${e.message}, retrying in ${wait}ms")
-                    Thread.sleep(wait)
+                    delay(wait)
                 }
             }
         }
