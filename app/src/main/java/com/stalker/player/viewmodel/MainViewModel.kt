@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlin.coroutines.coroutineContext
 import kotlin.random.Random
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -71,6 +72,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var currentCategory: Category? = null
     private var activeTab = "Live"
     private var searchJob: Job? = null
+    private var connectJob: Job? = null
 
     init {
         loadProfiles()
@@ -166,7 +168,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         currentUsername.value = if (selectedType == "xtream") macOrUser else ""
         currentPassword.value = if (selectedType == "xtream") password else ""
 
-        viewModelScope.launch {
+        connectJob?.cancel()
+        connectJob = viewModelScope.launch {
+            val job = coroutineContext[Job]
             try {
                 withTimeout(10_000L) {
                     val finalUrl = currentHostname.value
@@ -174,7 +178,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // Configura SOLO ed esclusivamente il client scelto
                     when (selectedType) {
                         "xtream" -> repository.configureXtream(finalUrl, currentUsername.value, currentPassword.value)
-                        "m3u" -> repository.configureM3u(finalUrl) 
+                        "m3u" -> repository.configureM3u(finalUrl)
                         else -> repository.configure(finalUrl, currentMac.value, selectedType)
                     }
 
@@ -182,24 +186,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val loadResult = repository.loadPlaylist()
 
                     loadResult
-                        .onSuccess { 
-                            connected.value = true
-                            viewModelScope.launch {
-                                repository.warmupSearchIndex()
+                        .onSuccess {
+                            // Se nel frattempo l'utente ha annullato, non completare la connessione.
+                            if (job?.isActive == true) {
+                                connected.value = true
+                                viewModelScope.launch {
+                                    repository.warmupSearchIndex()
+                                }
                             }
                         }
-                        .onFailure { e -> 
-                            if (e !is CancellationException) repository.setError(e.message ?: e.toString()) 
+                        .onFailure { e ->
+                            if (e !is CancellationException) repository.setError(e.message ?: e.toString())
                         }
                 }
             } catch (_: TimeoutCancellationException) {
                 connected.value = false
                 repository.setError(Strings["connectionTimeout"])
-            } catch (e: CancellationException) { 
-            } catch (e: Exception) { 
-                repository.setError(e.message ?: e.toString()) 
+            } catch (e: CancellationException) {
+            } catch (e: Exception) {
+                repository.setError(e.message ?: e.toString())
             }
         }
+    }
+
+    // Annulla una connessione in corso senza attendere il timeout di 10s.
+    fun cancelConnect() {
+        connectJob?.cancel()
+        connectJob = null
+        connected.value = false
+        repository.cancelLoading()
     }
 
     fun onCategoryClick(cat: Category) {

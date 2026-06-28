@@ -92,10 +92,21 @@ class StalkerRepository(
             }
             _progress.value = 100; _progress.value = 0; _isLoading.value = false
             Result.success(Unit)
+        } catch (e: CancellationException) {
+            // Connessione annullata dall'utente: nessun messaggio di errore, solo reset.
+            _isLoading.value = false; _progress.value = 0
+            throw e
         } catch (e: Exception) {
             _error.value = e.message ?: e.toString(); _isLoading.value = false; _progress.value = 0
             Result.failure(e)
         }
+    }
+
+    // Reset immediato dello stato di caricamento quando l'utente annulla la connessione.
+    fun cancelLoading() {
+        _isLoading.value = false
+        _progress.value = 0
+        _error.value = null
     }
 
     private suspend fun loadStb() {

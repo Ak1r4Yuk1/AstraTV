@@ -429,16 +429,29 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
                                 Text(if (showConnectStatus) Strings["connecting"] else Strings["connect"], fontWeight = FontWeight.Bold)
                             }
                             Spacer(Modifier.height(8.dp))
-                            OutlinedButton(
-                                onClick = { showSave = true },
-                                enabled = hostname.isNotBlank(),
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Gray),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Cyan.copy(alpha = 0.2f))
-                            ) {
-                                Icon(Icons.Default.Save, null, Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text(Strings["save"])
+                            if (showConnectStatus) {
+                                OutlinedButton(
+                                    onClick = { viewModel.cancelConnect(); connectPending = false },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Orange),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Orange.copy(alpha = 0.4f))
+                                ) {
+                                    Icon(Icons.Default.Close, null, Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(Strings["cancel"])
+                                }
+                            } else {
+                                OutlinedButton(
+                                    onClick = { showSave = true },
+                                    enabled = hostname.isNotBlank(),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Gray),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Cyan.copy(alpha = 0.2f))
+                                ) {
+                                    Icon(Icons.Default.Save, null, Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(Strings["save"])
+                                }
                             }
                         } else {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -463,10 +476,18 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
                                     }
                                     Text(if (showConnectStatus) Strings["connecting"] else Strings["connect"], fontWeight = FontWeight.Bold)
                                 }
-                                OutlinedButton(onClick = { showSave = true }, enabled = hostname.isNotBlank(), colors = ButtonDefaults.outlinedButtonColors(contentColor = Gray), border = androidx.compose.foundation.BorderStroke(1.dp, Cyan.copy(alpha = 0.2f))) {
-                                    Icon(Icons.Default.Save, null, Modifier.size(16.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(Strings["save"])
+                                if (showConnectStatus) {
+                                    OutlinedButton(onClick = { viewModel.cancelConnect(); connectPending = false }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Orange), border = androidx.compose.foundation.BorderStroke(1.dp, Orange.copy(alpha = 0.4f))) {
+                                        Icon(Icons.Default.Close, null, Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(Strings["cancel"])
+                                    }
+                                } else {
+                                    OutlinedButton(onClick = { showSave = true }, enabled = hostname.isNotBlank(), colors = ButtonDefaults.outlinedButtonColors(contentColor = Gray), border = androidx.compose.foundation.BorderStroke(1.dp, Cyan.copy(alpha = 0.2f))) {
+                                        Icon(Icons.Default.Save, null, Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(Strings["save"])
+                                    }
                                 }
                             }
                         }
