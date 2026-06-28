@@ -43,6 +43,9 @@ class M3uClient(private val context: Context) {
         val channelsByCategory: Map<String, List<Channel>>
     )
 
+    // Aborta tutte le richieste HTTP in volo (usato per annullare una connessione).
+    fun cancelAll() = http.dispatcher.cancelAll()
+
     suspend fun load(source: String): M3uPlaylist {
         return when {
             source.startsWith("content://") -> {

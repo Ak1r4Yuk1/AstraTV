@@ -97,13 +97,20 @@ class StalkerRepository(
             _isLoading.value = false; _progress.value = 0
             throw e
         } catch (e: Exception) {
+            // Se l'annullo ha abortito le richieste HTTP, la coroutine è già cancellata:
+            // ensureActive() rilancia CancellationException così non mostriamo un errore.
+            ensureActive()
             _error.value = e.message ?: e.toString(); _isLoading.value = false; _progress.value = 0
             Result.failure(e)
         }
     }
 
-    // Reset immediato dello stato di caricamento quando l'utente annulla la connessione.
+    // Annulla una connessione in corso: aborta le richieste HTTP in volo (così il
+    // login si ferma SUBITO, senza attendere i timeout) e resetta lo stato.
     fun cancelLoading() {
+        client.cancelAll()
+        xtreamClient.cancelAll()
+        m3uClient.cancelAll()
         _isLoading.value = false
         _progress.value = 0
         _error.value = null

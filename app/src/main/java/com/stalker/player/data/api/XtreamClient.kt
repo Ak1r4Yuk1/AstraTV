@@ -41,6 +41,9 @@ class XtreamClient {
             .build()
     }
 
+    // Aborta tutte le richieste HTTP in volo (usato per annullare una connessione).
+    fun cancelAll() = dispatcher.cancelAll()
+
     private suspend fun httpGetWithRetry(url: String, maxRetries: Int = 3): String = withContext(Dispatchers.IO) {
         var lastException: Exception? = null
         for (attempt in 1..maxRetries) {

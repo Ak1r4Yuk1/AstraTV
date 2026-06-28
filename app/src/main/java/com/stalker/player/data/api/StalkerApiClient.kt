@@ -51,6 +51,9 @@ class StalkerApiClient {
         .addInterceptor { chain -> chain.proceed(chain.request().newBuilder().header("User-Agent", UA).build()) }
         .build()
 
+    // Aborta tutte le richieste HTTP in volo (usato per annullare una connessione).
+    fun cancelAll() = http.dispatcher.cancelAll()
+
     private fun md5(s: String) = MessageDigest.getInstance("MD5").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
     private fun sha256(s: String) = MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
     private fun genSerial(mac: String) = md5(mac).take(13).uppercase()
