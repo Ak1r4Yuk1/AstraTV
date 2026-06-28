@@ -11,7 +11,6 @@ data class JsData(
     val random: String? = null,
     val data: List<Map<String, Any?>>? = null,
     @SerializedName("total_items") val totalItems: Any? = null,
-    val epg: List<Map<String, Any?>>? = null,
     val url: String? = null,
     val cmd: String? = null,
     val mac: String? = null,

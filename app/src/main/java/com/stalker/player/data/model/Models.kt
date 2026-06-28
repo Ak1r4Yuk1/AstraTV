@@ -52,15 +52,6 @@ data class Channel(
     val seriesNumbers: List<Int> = emptyList()
 )
 
-data class EpgItem(
-    val name: String = "",
-    val startTs: Long = 0,
-    val endTs: Long = 0,
-    val descr: String = "",
-    val category: String = "",
-    val durationMin: Int = 0
-)
-
 data class AccountInfo(
     val name: String = "",
     val serverUrl: String = "",

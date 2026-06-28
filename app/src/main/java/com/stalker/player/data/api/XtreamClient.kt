@@ -7,8 +7,6 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
-import java.text.SimpleDateFormat
-import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -856,68 +854,6 @@ class XtreamClient {
         if (raw.isBlank()) return ""
         val match = Regex("(19|20)\\d{2}").find(raw) ?: return ""
         return match.value
-    }
-
-    // ── EPG ───────────────────────────────────────────────────────
-
-    suspend fun getEpg(
-        url: String,
-        username: String,
-        password: String,
-        streamId: String,
-        limit: Int
-    ): List<EpgItem> = withContext(Dispatchers.IO) {
-        val builtUrl = buildUrl(
-            url, username, password,
-            "action" to "get_short_epg",
-            "stream_id" to streamId,
-            "limit" to limit.toString()
-        )
-        val body = httpGetWithRetry(builtUrl)
-        parseEpg(body)
-    }
-
-    private fun parseEpg(jsonStr: String): List<EpgItem> {
-        if (jsonStr.trim().equals("null", ignoreCase = true)) return emptyList()
-        val root = try {
-            JsonParser.parseString(jsonStr).asJsonObject
-        } catch (e: Exception) {
-            throw IOException("Invalid EPG response", e)
-        }
-        val listings = root.arr("epg_listings") ?: return emptyList()
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
-
-        return listings.map { el ->
-            val o = el.asJsonObject
-            val startStr = o.string("start")
-            val stopStr = o.string("stop")
-            val startTs = try {
-                (dateFormat.parse(startStr)?.time ?: 0L) / 1000L
-            } catch (_: Exception) {
-                0L
-            }
-            val endTs = try {
-                (dateFormat.parse(stopStr)?.time ?: 0L) / 1000L
-            } catch (_: Exception) {
-                0L
-            }
-            val durationMin = if (startTs > 0 && endTs > startTs) {
-                ((endTs - startTs) / 60000).toInt()
-            } else {
-                o.int("duration_secs")?.div(60)
-                    ?: o.int("duration")
-                    ?: 0
-            }
-
-            EpgItem(
-                name = o.string("title"),
-                startTs = startTs,
-                endTs = endTs,
-                descr = o.string("description").ifBlank { o.string("descr") },
-                category = o.string("category"),
-                durationMin = durationMin
-            )
-        }
     }
 
     // ── Stream URLs ───────────────────────────────────────────────

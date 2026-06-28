@@ -17,7 +17,6 @@
 - **Dual UI** — touch-optimized for phones/tablets and D-pad optimized for Android TV (Leanback)
 - **Built-in video player** — ExoPlayer with HLS support, fullscreen mode, and seek controls
 - **Live search** — debounced instant search across all channels and VOD content
-- **EPG** — electronic program guide with caching and on-demand fetching
 - **Profile management** — save, load, and delete multiple connection profiles
 - **Remote import** — embedded HTTP server with QR code to import playlists from your phone or PC
 - **Multi-language** — Italian, English, French, German, Spanish, Russian

@@ -26,7 +26,6 @@ class StalkerApiClient {
         private const val BACKOFF_MS = 800L
         private const val MAX_PARALLEL_REQUESTS = 24
         private const val MAX_PARALLEL_REQUESTS_PER_HOST = 12
-        private const val MAX_EPG_RESPONSE_CHARS = 1_000_000
         private const val MAX_CHANNEL_PAGE_CONCURRENCY = 4
     }
 
@@ -813,37 +812,4 @@ class StalkerApiClient {
         )
     }
 
-    // ── EPG ─────────────────────────────────────────────────────
-    suspend fun getEpg(token: String?, url: String, mac: String, channelId: String, portalType: String): List<EpgItem> = withContext(Dispatchers.IO) {
-        val base = url.trimEnd('/')
-        val pType = if (portalType == "stalker") "stalker" else "mac"
-        for (action in listOf("get_short_epg", "get_epg_info")) {
-            try {
-                val body = get(
-                    buildReq(base, pType, mac, token, mapOf("type" to "itv", "action" to action, "ch_id" to channelId, "size" to "3", "JsHttpRequest" to "1-xml")),
-                    maxChars = MAX_EPG_RESPONSE_CHARS
-                )
-                val root = safeParse(body) ?: continue
-                val jsNode = root.get("js") ?: continue
-                val dataArr = when {
-                    jsNode.isJsonArray -> jsNode.asJsonArray
-                    jsNode.isJsonObject -> jsNode.asJsonObject.getAsJsonArray("data")
-                        ?: jsNode.asJsonObject.getAsJsonArray("epg")
-                    else -> null
-                } ?: continue
-                val items = dataArr.map { el -> val o = el.asJsonObject
-                    EpgItem(
-                        name = o.get("name")?.asString ?: o.get("title")?.asString.orEmpty(),
-                        startTs = safeLong(o.get("start_timestamp")).let { if (it == 0L) o.get("start")?.asString?.toLongOrNull() ?: 0L else it },
-                        endTs = safeLong(o.get("stop_timestamp")).let { if (it == 0L) o.get("end")?.asString?.toLongOrNull() ?: o.get("stop")?.asString?.toLongOrNull() ?: 0L else it },
-                        descr = o.get("descr")?.asString ?: o.get("description")?.asString.orEmpty(),
-                        category = o.get("category")?.asString.orEmpty(),
-                        durationMin = safeInt(o.get("duration")).let { if (it == 0) safeInt(o.get("time")) else it }
-                    )
-                }
-                if (items.isNotEmpty()) return@withContext items
-            } catch (_: Exception) { continue }
-        }
-        emptyList()
-    }
 }

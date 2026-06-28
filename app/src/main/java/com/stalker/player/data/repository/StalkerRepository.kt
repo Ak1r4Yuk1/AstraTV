@@ -4,7 +4,6 @@ import android.content.Context
 import com.google.gson.JsonParser
 import com.stalker.player.data.api.StalkerApiClient
 import com.stalker.player.data.api.XtreamClient
-import com.stalker.player.data.api.EpgWorker
 import com.stalker.player.data.api.M3uClient
 import com.stalker.player.data.model.*
 import kotlinx.coroutines.*
@@ -60,18 +59,12 @@ class StalkerRepository(
     private val channelCache = mutableMapOf<String, List<Channel>>()
     private val seasonCache = mutableMapOf<String, List<Channel>>()
     private val episodeCache = mutableMapOf<String, List<Channel>>()
-    private val epgCache = mutableMapOf<String, List<EpgItem>>()
     private val m3uChannelsByCategory = mutableMapOf<String, List<Channel>>()
     private val m3uSeriesEpisodesBySeriesId = mutableMapOf<String, List<Channel>>()
     private val vodInfoCache = mutableMapOf<String, Channel>()
     private val seriesInfoCache = mutableMapOf<String, Channel>()
     private val searchIndexStore = SearchIndexStore(context.applicationContext)
-    
-    private val epgWorker = EpgWorker(fetcher = { channelId, _ ->
-        currentXtreamCredential()?.let { credential ->
-            xtreamClient.getEpg(credential.serverUrl, credential.username, credential.password, channelId, 3)
-        } ?: client.getEpg(token, portalUrl, portalMac, channelId, portalType)
-    })
+
     private val _profiles = mutableListOf<Profile>()
 
     fun getProfiles() = _profiles.toList()
@@ -554,53 +547,6 @@ class StalkerRepository(
         }
     }
 
-    suspend fun fetchEpg(channelId: String): Result<List<EpgItem>> = withContext(Dispatchers.IO) {
-        try {
-            epgCache[channelId]?.let { return@withContext Result.success(it) }
-            val items = when (portalType) {
-                "xtream" -> xtreamClient.getEpg(portalUrl, xtreamUser, xtreamPass, channelId, 10)
-                "m3u" -> m3uXtreamCredential?.let { credential ->
-                    xtreamClient.getEpg(credential.serverUrl, credential.username, credential.password, channelId, 10)
-                } ?: emptyList()
-                else -> client.getEpg(token, portalUrl, portalMac, channelId, portalType)
-            }
-            epgCache[channelId] = items
-            Result.success(items)
-        } catch (_: Exception) { 
-            Result.success(emptyList()) 
-        }
-    }
-
-    fun prefetchEpg(channels: List<Channel>, onReady: (Channel, List<EpgItem>) -> Unit) {
-        epgWorker.cancelPending()
-        channels.take(16).forEach { channel ->
-            epgWorker.request(channel, size = 3) { items ->
-                if (items.isEmpty()) return@request
-                val channelId = channel.id.ifBlank { channel.cmd }
-                synchronized(epgCache) {
-                    epgCache[channelId] = items
-                }
-                onReady(channel, items)
-            }
-        }
-    }
-
-    fun requestEpg(channel: Channel, onReady: (List<EpgItem>) -> Unit) {
-        if ((portalType == "m3u" && m3uXtreamCredential == null) || channel.itemType != "channel") return
-        val channelId = channel.id.ifBlank { channel.cmd }
-        epgCache[channelId]?.let {
-            onReady(it)
-            return
-        }
-        epgWorker.request(channel, size = 3) { items ->
-            if (items.isEmpty()) return@request
-            synchronized(epgCache) {
-                epgCache[channelId] = items
-            }
-            onReady(items)
-        }
-    }
-
     private fun clearCaches() {
         cachedXtreamEpisodesBySeriesId.clear()
         cachedM3uXtreamEpisodesBySeriesId.clear()
@@ -610,10 +556,8 @@ class StalkerRepository(
         episodeCache.clear()
         vodInfoCache.clear()
         seriesInfoCache.clear()
-        epgCache.clear()
         m3uChannelsByCategory.clear()
         m3uSeriesEpisodesBySeriesId.clear()
-        epgWorker.clear()
         clearSearch()
     }
 
@@ -1007,13 +951,6 @@ class StalkerRepository(
         }
 
         return null
-    }
-
-    private fun currentXtreamCredential(): XtreamCredential? = when {
-        portalType == "xtream" && xtreamUser.isNotBlank() && xtreamPass.isNotBlank() ->
-            XtreamCredential(portalUrl, xtreamUser, xtreamPass)
-        portalType == "m3u" -> m3uXtreamCredential
-        else -> null
     }
 
     private fun com.google.gson.JsonObject.string(key: String): String {
