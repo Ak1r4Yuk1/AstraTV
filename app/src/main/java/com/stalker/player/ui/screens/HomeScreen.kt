@@ -136,6 +136,8 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
     val currentPassword by viewModel.currentPassword.collectAsState()
     val searchLoading by viewModel.searchLoading.collectAsState()
     val remoteMessage by viewModel.remoteImportMessage.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val progress by viewModel.progress.collectAsState()
     val isX = portalType == "xtream"
     val isM3u = portalType == "m3u"
     val hostname = when (portalType) {
@@ -146,8 +148,8 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
     val mac = macAddress
     val username = xtreamUsername
     val password = xtreamPassword
-    val loginLoading = !connected && viewModel.isLoading.value
-    val showConnectStatus = connectPending || loginLoading || viewModel.progress.value > 0
+    val loginLoading = !connected && isLoading
+    val showConnectStatus = connectPending || loginLoading || progress > 0
     val scope = rememberCoroutineScope()
     var lastBackAt by remember { mutableLongStateOf(0L) }
     val m3uPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -214,8 +216,8 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
         }
     }
 
-    LaunchedEffect(loginLoading, connected, error, viewModel.progress.value) {
-        if (loginLoading || viewModel.progress.value > 0 || connected || !error.isNullOrBlank()) {
+    LaunchedEffect(loginLoading, connected, error, progress) {
+        if (loginLoading || progress > 0 || connected || !error.isNullOrBlank()) {
             connectPending = false
         }
     }
@@ -503,7 +505,7 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
                                     Text(
                                         when {
                                             connectPending -> Strings["startingConnection"]
-                                            viewModel.progress.value >= 80 -> Strings["loadingCategories"]
+                                            progress >= 80 -> Strings["loadingCategories"]
                                             else -> Strings["handshake"]
                                         },
                                         color = White,
@@ -511,9 +513,9 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
                                         fontWeight = FontWeight.Medium
                                     )
                                     Spacer(Modifier.height(8.dp))
-                                    if (viewModel.progress.value > 0) {
+                                    if (progress > 0) {
                                         LinearProgressIndicator(
-                                            progress = { (viewModel.progress.value.coerceIn(0, 100)) / 100f },
+                                            progress = { (progress.coerceIn(0, 100)) / 100f },
                                             modifier = Modifier.fillMaxWidth(),
                                             color = Cyan,
                                             trackColor = Bg
@@ -527,7 +529,7 @@ fun HomeScreen(viewModel: MainViewModel, onPlay: () -> Unit) {
                                     }
                                     Spacer(Modifier.height(6.dp))
                                     Text(
-                                        if (viewModel.progress.value > 0) "${viewModel.progress.value}%" else Strings["pleaseWait"],
+                                        if (progress > 0) "$progress%" else Strings["pleaseWait"],
                                         color = Gray,
                                         fontSize = 11.sp
                                     )
@@ -817,6 +819,7 @@ fun ChannelListView(viewModel: MainViewModel, tab: String, query: String, onPlay
     val cats by viewModel.categories.collectAsState()
     val searchResults by viewModel.searchResults.collectAsState()
     val searchLoading by viewModel.searchLoading.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
     val scope = rememberCoroutineScope()
     // Stati di scroll distinti per la lista categorie e per la lista canali, mantenuti
     // tra le navigazioni avanti/indietro.
@@ -834,7 +837,7 @@ fun ChannelListView(viewModel: MainViewModel, tab: String, query: String, onPlay
                 Text(Strings["back"], color = Cyan, fontSize = 12.sp)
             }
         }
-        if (viewModel.isLoading.value && cv == "channels") {
+        if (isLoading && cv == "channels") {
             Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator(modifier = Modifier.size(32.dp), color = Cyan, strokeWidth = 3.dp)
                 Spacer(Modifier.height(8.dp))

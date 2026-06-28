@@ -3,8 +3,10 @@ package com.stalker.player.data.api
 import com.google.gson.JsonParser
 import com.stalker.player.data.model.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
@@ -86,12 +88,15 @@ class XtreamClient {
         password: String,
         vararg params: Pair<String, String>
     ): String {
-        val base = serverUrl.trimEnd('/')
-        val sb = StringBuilder("$base/player_api.php?username=$username&password=$password")
+        val builder = "${serverUrl.trimEnd('/')}/player_api.php"
+            .toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("username", username)
+            .addQueryParameter("password", password)
         for ((key, value) in params) {
-            sb.append("&$key=$value")
+            builder.addQueryParameter(key, value)
         }
-        return sb.toString()
+        return builder.build().toString()
     }
 
     private fun com.google.gson.JsonObject.string(key: String): String {
@@ -148,6 +153,8 @@ class XtreamClient {
             // 2. Parsing dell'elemento base
             val jsonElement = try {
                 JsonParser.parseString(bodyTrimmed)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 return Result.failure(IOException("Errore parsing stringa (Non è un JSON valido): ${e.message}"))
             }
@@ -194,6 +201,8 @@ class XtreamClient {
             val serverInfo = if (serverInfoEl != null && !serverInfoEl.isJsonNull) serverInfoEl.toString() else "{}"
             
             Result.success(Pair(userInfo, serverInfo))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -354,6 +363,8 @@ class XtreamClient {
             val parsed = try {
                 val body = httpGetWithRetry(candidateUrl)
                 parseSeriesDetails(body, seriesId)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 lastError = e
                 continue
@@ -404,6 +415,8 @@ class XtreamClient {
             val parsed = try {
                 val body = httpGetWithRetry(candidateUrl)
                 parseVodInfo(body, vodId)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 lastError = e
                 continue
@@ -500,6 +513,8 @@ class XtreamClient {
             val parsed = try {
                 val body = httpGetWithRetry(candidateUrl)
                 parseSeriesInfo(body, seriesId)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 lastError = e
                 continue
@@ -868,8 +883,13 @@ class XtreamClient {
         password: String,
         streamId: String
     ): String {
-        val base = serverUrl.trimEnd('/')
-        return "$base/live/$username/$password/$streamId.ts"
+        return serverUrl.trimEnd('/').toHttpUrl().newBuilder()
+            .addPathSegment("live")
+            .addPathSegment(username)
+            .addPathSegment(password)
+            .addPathSegment("$streamId.ts")
+            .build()
+            .toString()
     }
 
     fun getVodStreamUrl(
@@ -879,8 +899,13 @@ class XtreamClient {
         streamId: String,
         extension: String = "mp4"
     ): String {
-        val base = serverUrl.trimEnd('/')
-        return "$base/movie/$username/$password/$streamId.${extension.ifBlank { "mp4" }}"
+        return serverUrl.trimEnd('/').toHttpUrl().newBuilder()
+            .addPathSegment("movie")
+            .addPathSegment(username)
+            .addPathSegment(password)
+            .addPathSegment("$streamId.${extension.ifBlank { "mp4" }}")
+            .build()
+            .toString()
     }
 
     fun getSeriesStreamUrl(
@@ -890,7 +915,12 @@ class XtreamClient {
         episodeId: String,
         extension: String = "mp4"
     ): String {
-        val base = serverUrl.trimEnd('/')
-        return "$base/series/$username/$password/$episodeId.${extension.ifBlank { "mp4" }}"
+        return serverUrl.trimEnd('/').toHttpUrl().newBuilder()
+            .addPathSegment("series")
+            .addPathSegment(username)
+            .addPathSegment(password)
+            .addPathSegment("$episodeId.${extension.ifBlank { "mp4" }}")
+            .build()
+            .toString()
     }
 }

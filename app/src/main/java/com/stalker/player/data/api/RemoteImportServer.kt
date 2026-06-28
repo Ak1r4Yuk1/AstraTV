@@ -1,5 +1,6 @@
 package com.stalker.player.data.api
 
+import android.annotation.SuppressLint
 import android.content.Context
 import com.stalker.player.R
 import com.stalker.player.data.model.Profile
@@ -312,6 +313,7 @@ class RemoteImportServer(
         else -> "M3U remoto"
     }
 
+    @SuppressLint("ResourceType")
     private fun loadBrandImage(): ByteArray {
         context.resources.openRawResource(R.drawable.banner).use { input ->
             return input.readBytes()

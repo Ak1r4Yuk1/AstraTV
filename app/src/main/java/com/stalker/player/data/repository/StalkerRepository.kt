@@ -55,6 +55,11 @@ class StalkerRepository(
     @Volatile private var channelLoadVersion = 0
     @Volatile private var seasonLoadVersion = 0
     @Volatile private var episodeLoadVersion = 0
+    // Generazione del caricamento corrente: incrementata ad ogni connect e ad ogni
+    // annullo. Una coroutine di load "orfana" (annullata ma ancora viva perché un
+    // try/catch interno ha inghiottito la cancellazione) ha un epoch diverso e quindi
+    // non aggiorna più lo stato della UI.
+    @Volatile private var loadEpoch = 0
     
     private val channelCache = mutableMapOf<String, List<Channel>>()
     private val seasonCache = mutableMapOf<String, List<Channel>>()
@@ -83,31 +88,50 @@ class StalkerRepository(
     fun getToken(): String? = token
 
     suspend fun loadPlaylist(): Result<Unit> = withContext(Dispatchers.IO) {
+        val epoch = ++loadEpoch
         _isLoading.value = true; _progress.value = 0; _error.value = null
         try {
             when (portalType) {
-                "xtream" -> loadXtream()
-                "m3u" -> loadM3u()
-                else -> loadStb()
+                "xtream" -> loadXtream(epoch)
+                "m3u" -> loadM3u(epoch)
+                else -> loadStb(epoch)
             }
-            _progress.value = 100; _progress.value = 0; _isLoading.value = false
+            if (epoch == loadEpoch) { _progress.value = 100; _progress.value = 0; _isLoading.value = false }
             Result.success(Unit)
         } catch (e: CancellationException) {
             // Connessione annullata dall'utente: nessun messaggio di errore, solo reset.
-            _isLoading.value = false; _progress.value = 0
+            if (epoch == loadEpoch) { _isLoading.value = false; _progress.value = 0 }
             throw e
         } catch (e: Exception) {
             // Se l'annullo ha abortito le richieste HTTP, la coroutine è già cancellata:
             // ensureActive() rilancia CancellationException così non mostriamo un errore.
             ensureActive()
-            _error.value = e.message ?: e.toString(); _isLoading.value = false; _progress.value = 0
+            // Un load orfano (epoch diverso) non deve sovrascrivere lo stato.
+            if (epoch == loadEpoch) { _error.value = e.message ?: e.toString(); _isLoading.value = false; _progress.value = 0 }
             Result.failure(e)
         }
     }
 
+    // Aggiorna l'avanzamento solo se il caricamento non è stato annullato/superato.
+    private fun setProgress(epoch: Int, value: Int) {
+        if (epoch == loadEpoch) _progress.value = value
+    }
+
+    // Come runCatching, ma NON inghiotte la CancellationException: la rilancia così la
+    // cancellazione di una connessione si propaga invece di essere silenziata.
+    private inline fun <T> runCatchingCancellable(block: () -> T): Result<T> =
+        try {
+            Result.success(block())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Result.failure(e)
+        }
+
     // Annulla una connessione in corso: aborta le richieste HTTP in volo (così il
     // login si ferma SUBITO, senza attendere i timeout) e resetta lo stato.
     fun cancelLoading() {
+        loadEpoch++   // invalida il load in corso: eventuali coroutine orfane non toccheranno più la UI
         client.cancelAll()
         xtreamClient.cancelAll()
         m3uClient.cancelAll()
@@ -116,29 +140,31 @@ class StalkerRepository(
         _error.value = null
     }
 
-    private suspend fun loadStb() {
-        token = client.handshake(portalUrl, portalMac, portalType); _progress.value = 15
-        val profileInfo = runCatching {
+    private suspend fun loadStb(epoch: Int) {
+        token = client.handshake(portalUrl, portalMac, portalType); setProgress(epoch, 15)
+        val profileInfo = runCatchingCancellable {
             client.getProfileInfo(portalUrl, portalMac, token!!, portalType)
         }.getOrDefault(AccountInfo(serverUrl = portalUrl, mac = portalMac, isStalker = portalType == "stalker"))
-        _progress.value = 25
+        setProgress(epoch, 25)
         val results = coroutineScope {
             listOf(
                 async { client.getCategories(token!!, portalUrl, portalMac, "itv") },
                 async { client.getCategories(token!!, portalUrl, portalMac, "vod") },
                 async { client.getCategories(token!!, portalUrl, portalMac, "series") }
             ).awaitAll()
-        }; _progress.value = 80
+        }; setProgress(epoch, 80)
         _categories.value = mapOf("Live" to results[0], "Movies" to results[1], "Series" to results[2])
         try {
             val accountInfo = client.getAccountInfo(token!!, portalUrl, portalMac, portalType)
             _accountInfo.value = mergeAccountInfo(accountInfo, profileInfo)
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             _accountInfo.value = mergeAccountInfo(AccountInfo(), profileInfo)
         }
     }
 
-    private suspend fun loadXtream() {
+    private suspend fun loadXtream(epoch: Int) {
         val (userJson, serverJson) = xtreamClient.authenticate(portalUrl, xtreamUser, xtreamPass).getOrThrow()
         _accountInfo.value = buildXtreamAccountInfo(
             userJson = userJson,
@@ -146,25 +172,25 @@ class StalkerRepository(
             credential = XtreamCredential(portalUrl, xtreamUser, xtreamPass),
             fallbackServerUrl = portalUrl
         )
-        _progress.value = 30
+        setProgress(epoch, 30)
         val results = coroutineScope {
             listOf(
                 async { xtreamClient.getLiveCategories(portalUrl, xtreamUser, xtreamPass) },
                 async { xtreamClient.getVodCategories(portalUrl, xtreamUser, xtreamPass) },
                 async { xtreamClient.getSeriesCategories(portalUrl, xtreamUser, xtreamPass) }
             ).awaitAll()
-        }; _progress.value = 90
+        }; setProgress(epoch, 90)
         _categories.value = mapOf("Live" to results[0], "Movies" to results[1], "Series" to results[2])
     }
 
-    private suspend fun loadM3u() {
+    private suspend fun loadM3u(epoch: Int) {
         m3uXtreamCredential = null
         cachedM3uXtreamEpisodesBySeriesId.clear()
 
         val extractedCredential = m3uClient.extractXtreamCredential(m3uSource)
         if (extractedCredential != null) {
-            val loadedViaXtream = runCatching {
-                loadM3uViaXtream(extractedCredential)
+            val loadedViaXtream = runCatchingCancellable {
+                loadM3uViaXtream(extractedCredential, epoch)
             }.isSuccess
             if (loadedViaXtream) return
         }
@@ -177,10 +203,10 @@ class StalkerRepository(
         val seriesCategories = playlist.categories.filter { it.categoryType.equals("Series", ignoreCase = true) }
         _categories.value = mapOf("Live" to liveCategories, "Movies" to movieCategories, "Series" to seriesCategories)
         _accountInfo.value = AccountInfo(name = Strings["m3uPlaylist"], serverUrl = m3uSource, isStalker = false)
-        _progress.value = 90
+        setProgress(epoch, 90)
     }
 
-    private suspend fun loadM3uViaXtream(credential: XtreamCredential) {
+    private suspend fun loadM3uViaXtream(credential: XtreamCredential, epoch: Int) {
         val (userJson, serverJson) = xtreamClient.authenticate(
             credential.serverUrl,
             credential.username,
@@ -192,7 +218,7 @@ class StalkerRepository(
             credential = credential,
             fallbackServerUrl = credential.serverUrl
         )
-        _progress.value = 30
+        setProgress(epoch, 30)
         val results = coroutineScope {
             listOf(
                 async { xtreamClient.getLiveCategories(credential.serverUrl, credential.username, credential.password) },
@@ -203,7 +229,7 @@ class StalkerRepository(
         m3uXtreamCredential = credential
         m3uChannelsByCategory.clear()
         _categories.value = mapOf("Live" to results[0], "Movies" to results[1], "Series" to results[2])
-        _progress.value = 90
+        setProgress(epoch, 90)
     }
 
     suspend fun warmupSearchIndex() = withContext(Dispatchers.IO) {
@@ -296,6 +322,11 @@ class StalkerRepository(
                 _isLoading.value = false
             }
             Result.success(visibleChannels)
+        } catch (e: CancellationException) {
+            if (requestVersion == channelLoadVersion) {
+                _isLoading.value = false
+            }
+            Result.failure(e)
         } catch (e: Exception) {
             _error.value = e.message ?: e.toString()
             if (requestVersion == channelLoadVersion) {
@@ -365,6 +396,11 @@ class StalkerRepository(
                 _isLoading.value = false
             }
             Result.success(s)
+        } catch (e: CancellationException) {
+            if (requestVersion == seasonLoadVersion) {
+                _isLoading.value = false
+            }
+            Result.failure(e)
         } catch (e: Exception) {
             _error.value = e.message ?: e.toString()
             if (requestVersion == seasonLoadVersion) {
@@ -457,6 +493,11 @@ class StalkerRepository(
                 _isLoading.value = false
             }
             Result.success(ep)
+        } catch (e: CancellationException) {
+            if (requestVersion == episodeLoadVersion) {
+                _isLoading.value = false
+            }
+            Result.failure(e)
         } catch (e: Exception) {
             _error.value = e.message ?: e.toString()
             if (requestVersion == episodeLoadVersion) {
@@ -494,6 +535,8 @@ class StalkerRepository(
             // Risolve eventuali redirect (es. RAI relinker -> .m3u8) cosi' ExoPlayer
             // riconosce il formato reale dello stream.
             Result.success(m3uClient.resolveFinalUrl(url))
+        } catch (e: CancellationException) {
+            Result.failure(e)
         } catch (e: Exception) { 
             _error.value = e.message ?: e.toString()
             Result.failure(e) 
@@ -518,6 +561,8 @@ class StalkerRepository(
             }
             vodInfoCache[cacheKey] = details
             Result.success(mergeVodItem(item, details))
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             Result.success(item)
         }
@@ -560,6 +605,8 @@ class StalkerRepository(
                 }
             }
             Result.success(best)
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             Result.success(item)
         }
@@ -827,6 +874,8 @@ class StalkerRepository(
         for (seriesId in candidates) {
             val fetchedEpisodes = try {
                 fetchEpisodes(seriesId)
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 continue
             }
@@ -852,6 +901,8 @@ class StalkerRepository(
         for (seriesId in candidates) {
             val info = try {
                 fetchSeriesInfo(seriesId)
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 continue
             }

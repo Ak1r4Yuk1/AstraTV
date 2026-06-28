@@ -5,6 +5,7 @@ import android.content.pm.ActivityInfo
 import android.view.View
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.annotation.OptIn as AndroidXOptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -38,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -51,6 +53,7 @@ import com.stalker.player.ui.theme.DarkBg
 import kotlinx.coroutines.delay
 
 @Composable
+@AndroidXOptIn(UnstableApi::class)
 fun PlayerScreen(streamUrl: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val activity = context as Activity
